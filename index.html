@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Advanced Procedural Maze · ECS · Minimap</title>
   <style>
     html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:Arial,sans-serif;}
@@ -123,14 +124,14 @@
 </div>
 
 <!-- Three.js CDN -->
-<script src="https://unpkg.com/three@0.150.1/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.150.1/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/controls/OrbitControls.js"></script>
 
 <script>
 try {
   /***** ──────────────────────────────────────────────────
-    * ADVANCED ECS ARCHITECTURE
-    * ────────────────────────────────────────────────── */
+   * ADVANCED ECS ARCHITECTURE
+   * ────────────────────────────────────────────────── */
   
   // Component registry
   const ComponentTypes = {
@@ -207,8 +208,8 @@ try {
   }
 
   /***** ──────────────────────────────────────────────────
-    * MAZE GENERATION WITH GUARANTEED SOLUTION
-    * ────────────────────────────────────────────────── */
+   * MAZE GENERATION WITH GUARANTEED SOLUTION
+   * ────────────────────────────────────────────────── */
   
   function generateSolvableMaze(cols, rows) {
     // Initialize grid
@@ -303,8 +304,8 @@ try {
   }
 
   /***** ──────────────────────────────────────────────────
-    * CAMERA SYSTEM
-    * ────────────────────────────────────────────────── */
+   * CAMERA SYSTEM
+   * ────────────────────────────────────────────────── */
   
   const CameraMode = {
     THIRD_PERSON: 'third_person',
@@ -363,8 +364,8 @@ try {
   }
 
   /***** ──────────────────────────────────────────────────
-    * MINIMAP WITH FOG OF WAR
-    * ────────────────────────────────────────────────── */
+   * MINIMAP WITH FOG OF WAR
+   * ────────────────────────────────────────────────── */
   
   class MinimapSystem {
     constructor(canvasId, maze, cols, rows) {
@@ -496,8 +497,8 @@ try {
   }
 
   /***** ──────────────────────────────────────────────────
-    * SCENE SETUP
-    * ────────────────────────────────────────────────── */
+   * SCENE SETUP
+   * ────────────────────────────────────────────────── */
   
   const scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(0x000000, 0.05);
@@ -518,9 +519,12 @@ try {
   directionalLight.shadow.mapSize.height = 2048;
   scene.add(directionalLight);
 
+  // *** NEW: Texture Loader ***
+  const textureLoader = new THREE.TextureLoader();
+
   /***** ──────────────────────────────────────────────────
-    * GAME STATE
-    * ────────────────────────────────────────────────── */
+   * GAME STATE
+   * ────────────────────────────────────────────────── */
   
   let world, cameraSystem, minimapSystem;
   let COLS = 20, ROWS = 20, CELL_SIZE = 2;
@@ -543,15 +547,11 @@ try {
     minimapSystem = new MinimapSystem('minimap', maze, COLS, ROWS);
     minimapSystem.setGoal(maze.end);
     
-    // Clear scene
-    while(scene.children.length > 0) {
-      scene.remove(scene.children[0]);
-    }
-    
-    // Re-add lights
-    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-    scene.add(directionalLight);
-    
+    // Clear scene, but preserve the lights
+    // This is more efficient than removing and re-adding them
+    const objectsToRemove = scene.children.filter(obj => !(obj.isLight));
+    objectsToRemove.forEach(obj => scene.remove(obj));
+
     buildMazeGeometry();
     createPlayer();
     createGoal();
@@ -559,8 +559,10 @@ try {
     cameraSystem.setTarget(playerEntity);
     minimapSystem.setPlayer(playerEntity);
     
-    // Setup systems
-    setupSystems();
+    // Setup systems if they don't exist
+    if (world.systems.length === 0) {
+        setupSystems();
+    }
     
     gameCompleted = false;
     document.getElementById('goal-indicator').style.opacity = '0';
@@ -569,9 +571,30 @@ try {
   function buildMazeGeometry() {
     walls = [];
     
-    // Materials
-    const wallMaterial = new THREE.MeshLambertMaterial({ color: 0x666666 });
-    const floorMaterial = new THREE.MeshLambertMaterial({ color: 0x222222 });
+    // *** MODIFICATION: Load Textures and create new materials ***
+    const floorTexture = textureLoader.load(
+        'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/hardwood2_diffuse.jpg',
+        (texture) => { console.log("Floor texture loaded."); },
+        undefined,
+        (err) => { console.error("Could not load floor texture.", err); }
+    );
+    floorTexture.wrapS = THREE.RepeatWrapping;
+    floorTexture.wrapT = THREE.RepeatWrapping;
+    floorTexture.repeat.set(COLS, ROWS); // Tile texture across the entire floor
+
+    const wallTexture = textureLoader.load(
+        'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/brick_diffuse.jpg',
+        (texture) => { console.log("Wall texture loaded."); },
+        undefined,
+        (err) => { console.error("Could not load wall texture.", err); }
+    );
+    wallTexture.wrapS = THREE.RepeatWrapping;
+    wallTexture.wrapT = THREE.RepeatWrapping;
+    wallTexture.repeat.set(1, 0.5); // Tile texture on each wall segment
+
+    // Use MeshStandardMaterial for more realistic lighting
+    const floorMaterial = new THREE.MeshStandardMaterial({ map: floorTexture, roughness: 0.8, metalness: 0.1 });
+    const wallMaterial = new THREE.MeshStandardMaterial({ map: wallTexture, roughness: 0.9, metalness: 0.0 });
     
     // Floor
     const floor = new THREE.Mesh(
@@ -593,7 +616,7 @@ try {
         
         // Create walls based on cell walls
         if (cell.walls[0]) { // top
-          const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+          const wall = new THREE.Mesh(wallGeometry, wallMaterial.clone()); // Use clone to allow unique texture transforms if needed
           wall.position.set(x, 0.75, z - CELL_SIZE / 2);
           wall.castShadow = true;
           scene.add(wall);
@@ -601,7 +624,7 @@ try {
         }
         
         if (cell.walls[3]) { // left
-          const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+          const wall = new THREE.Mesh(wallGeometry, wallMaterial.clone());
           wall.rotation.y = Math.PI / 2;
           wall.position.set(x - CELL_SIZE / 2, 0.75, z);
           wall.castShadow = true;
@@ -609,9 +632,9 @@ try {
           walls.push({ x: x - CELL_SIZE / 2, z, horizontal: false });
         }
         
-        // Boundary walls
+        // Boundary walls for the last row and column
         if (r === ROWS - 1 && cell.walls[2]) {
-          const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+          const wall = new THREE.Mesh(wallGeometry, wallMaterial.clone());
           wall.position.set(x, 0.75, z + CELL_SIZE / 2);
           wall.castShadow = true;
           scene.add(wall);
@@ -619,7 +642,7 @@ try {
         }
         
         if (c === COLS - 1 && cell.walls[1]) {
-          const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+          const wall = new THREE.Mesh(wallGeometry, wallMaterial.clone());
           wall.rotation.y = Math.PI / 2;
           wall.position.set(x + CELL_SIZE / 2, 0.75, z);
           wall.castShadow = true;
@@ -646,13 +669,13 @@ try {
     });
     
     world.addComponent(playerEntity, ComponentTypes.PHYSICS, {
-      mass: 1.0,              // kg
+      mass: 1.0,               // kg
       acceleration: { x: 0, z: 0 }, // m/s²
-      maxSpeed: 5.0,          // m/s (reduced from 6.0)
-      moveForce: 12.0,        // N (reduced from 15.0)
-      friction: 0.88,         // friction coefficient (increased for smoother stopping)
-      airResistance: 0.92,    // air resistance coefficient (increased)
-      groundFriction: 0.85,   // ground friction when moving (increased)
+      maxSpeed: 5.0,           // m/s
+      moveForce: 12.0,           // N
+      friction: 0.88,          // friction coefficient
+      airResistance: 0.92,     // air resistance coefficient
+      groundFriction: 0.85,    // ground friction when moving
       isGrounded: true
     });
     
@@ -668,6 +691,7 @@ try {
       metalness: 0.1
     });
     const mesh = new THREE.Mesh(geometry, material);
+    mesh.castShadow = true; // Player should cast a shadow
     
     world.addComponent(playerEntity, ComponentTypes.RENDER, { mesh });
     
@@ -711,8 +735,8 @@ try {
   }
 
   /***** ──────────────────────────────────────────────────
-    * ECS SYSTEMS
-    * ────────────────────────────────────────────────── */
+   * ECS SYSTEMS
+   * ────────────────────────────────────────────────── */
   
   function setupSystems() {
     // Input System - Apply forces based on input
@@ -774,12 +798,12 @@ try {
           velocity.vz *= groundFrictionFactor;
         }
         
-        // Speed limiting with smooth transition
+        // Speed limiting
         const currentSpeed = Math.sqrt(velocity.vx * velocity.vx + velocity.vz * velocity.vz);
         if (currentSpeed > physics.maxSpeed) {
           const scale = physics.maxSpeed / currentSpeed;
-          velocity.vx *= scale * 0.95; // Slightly softer limiting
-          velocity.vz *= scale * 0.95;
+          velocity.vx *= scale;
+          velocity.vz *= scale;
         }
         
         // Stop very small velocities to prevent micro-jitter
@@ -804,37 +828,14 @@ try {
         if (!checkCollision(newX, transform.z)) {
           transform.x = newX;
         } else {
-          // Simple collision response - just stop movement
-          velocity.vx *= -0.1; // Very small bounce back
-          velocity.vx *= 0.3;  // Lose most energy
+          velocity.vx *= -0.1; 
         }
         
         // Handle Z-axis collision
         if (!checkCollision(transform.x, newZ)) {
           transform.z = newZ;
         } else {
-          // Simple collision response - just stop movement
-          velocity.vz *= -0.1; // Very small bounce back
-          velocity.vz *= 0.3;  // Lose most energy
-        }
-        
-        // Boundary constraints with simple stopping
-        const halfSize = Math.max(COLS, ROWS) * CELL_SIZE / 2 - 0.5;
-        
-        if (transform.x < -halfSize) {
-          transform.x = -halfSize;
-          velocity.vx = Math.max(0, velocity.vx); // Only allow moving away from boundary
-        } else if (transform.x > halfSize) {
-          transform.x = halfSize;
-          velocity.vx = Math.min(0, velocity.vx); // Only allow moving away from boundary
-        }
-        
-        if (transform.z < -halfSize) {
-          transform.z = -halfSize;
-          velocity.vz = Math.max(0, velocity.vz); // Only allow moving away from boundary
-        } else if (transform.z > halfSize) {
-          transform.z = halfSize;
-          velocity.vz = Math.min(0, velocity.vz); // Only allow moving away from boundary
+          velocity.vz *= -0.1;
         }
       }
     });
@@ -848,19 +849,12 @@ try {
         const render = world.getComponent(entityId, ComponentTypes.RENDER);
         
         if (render.mesh) {
-          // Simple, smooth position update
           render.mesh.position.set(transform.x, transform.y, transform.z);
           
-          // Add subtle rotation based on movement for the player (much smoother)
           if (world.hasComponent(entityId, ComponentTypes.PLAYER)) {
             const velocity = world.getComponent(entityId, ComponentTypes.VELOCITY);
-            
-            // Very subtle rotation effect
             render.mesh.rotation.x += velocity.vz * deltaTime * 0.5;
             render.mesh.rotation.z -= velocity.vx * deltaTime * 0.5;
-            
-            // No bobbing - keep it stable
-            render.mesh.position.y = transform.y;
           }
         }
       }
@@ -888,8 +882,8 @@ try {
             gameCompleted = true;
             document.getElementById('goal-indicator').style.opacity = '1';
             setTimeout(() => {
-              document.getElementById('goal-indicator').style.opacity = '0';
-            }, 3000);
+              initializeGame();
+            }, 3000); // Automatically start new game after 3 seconds
           }
         }
       }
@@ -905,17 +899,14 @@ try {
         const velocity = world.getComponent(playerId, ComponentTypes.VELOCITY);
         const physics = world.getComponent(playerId, ComponentTypes.PHYSICS);
         
-        // Calculate current speed
         const speed = Math.sqrt(velocity.vx * velocity.vx + velocity.vz * velocity.vz);
         
-        // Update physics debug display
         document.getElementById('debug-speed').textContent = speed.toFixed(2);
         document.getElementById('debug-vx').textContent = velocity.vx.toFixed(2);
         document.getElementById('debug-vz').textContent = velocity.vz.toFixed(2);
         document.getElementById('debug-ax').textContent = physics.acceleration.x.toFixed(2);
         document.getElementById('debug-az').textContent = physics.acceleration.z.toFixed(2);
         
-        // Show current input
         let inputX = 0, inputZ = 0;
         if (keyState['KeyD'] || keyState['ArrowRight']) inputX += 1;
         if (keyState['KeyA'] || keyState['ArrowLeft']) inputX -= 1;
@@ -933,6 +924,14 @@ try {
   function checkCollision(x, z, radius = 0.3) {
     const buffer = 0.1;
     
+    // World boundary check
+    const halfWidth = COLS * CELL_SIZE / 2;
+    const halfDepth = ROWS * CELL_SIZE / 2;
+    if (x < -halfWidth + radius || x > halfWidth - radius || z < -halfDepth + radius || z > halfDepth - radius) {
+        return true;
+    }
+
+    // Maze wall check
     for (const wall of walls) {
       const dx = Math.abs(x - wall.x);
       const dz = Math.abs(z - wall.z);
@@ -951,14 +950,15 @@ try {
   }
 
   /***** ──────────────────────────────────────────────────
-    * INPUT HANDLING
-    * ────────────────────────────────────────────────── */
+   * INPUT HANDLING
+   * ────────────────────────────────────────────────── */
   
   const keyState = {};
   
   window.addEventListener('keydown', (e) => {
     keyState[e.code] = true;
     
+    // These controls should not be blocked by typing in an input field in the future
     if (e.code === 'KeyC') {
       cameraSystem.toggleMode();
     } else if (e.code === 'KeyM') {
@@ -983,31 +983,37 @@ try {
   });
 
   /***** ──────────────────────────────────────────────────
-    * MAIN GAME LOOP
-    * ────────────────────────────────────────────────── */
+   * MAIN GAME LOOP
+   * ────────────────────────────────────────────────── */
   
   let lastTime = performance.now();
   
   function gameLoop(currentTime) {
+    requestAnimationFrame(gameLoop);
+
     const rawDeltaTime = (currentTime - lastTime) / 1000;
     lastTime = currentTime;
     
-    // Smooth deltaTime to prevent huge jumps and ensure consistent physics
-    const deltaTime = Math.min(rawDeltaTime, 1/30); // Cap at ~30fps minimum
+    // Cap deltaTime to prevent huge jumps and ensure consistent physics
+    const deltaTime = Math.min(rawDeltaTime, 1/30); 
     
     // Update ECS systems
-    world.update(deltaTime);
+    if (world) {
+        world.update(deltaTime);
+    }
     
     // Update camera
-    cameraSystem.update(world);
+    if (cameraSystem) {
+        cameraSystem.update(world);
+    }
     
     // Update minimap
-    minimapSystem.update(world);
+    if (minimapSystem) {
+        minimapSystem.update(world);
+    }
     
     // Render
     renderer.render(scene, camera);
-    
-    requestAnimationFrame(gameLoop);
   }
 
   // Initialize and start the game
@@ -1015,10 +1021,6 @@ try {
   gameLoop(lastTime);
 
   console.log("🎮 Advanced Physics-Based Maze Game Loaded!");
-  console.log("🚀 Features: Momentum, inertia, friction, and realistic movement!");
-  console.log("🎯 Find the green exit to complete the maze!");
-  console.log("📋 Controls: WASD to move, C for camera, M for minimap, P for physics debug, R for new maze");
-  console.log("⚡ Physics: Feel the acceleration, momentum, and friction as you navigate!");
 
 } catch (error) {
   console.error("Failed to initialize maze game:", error);
