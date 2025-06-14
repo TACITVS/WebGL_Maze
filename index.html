@@ -1,0 +1,1035 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Advanced Procedural Maze · ECS · Minimap</title>
+  <style>
+    html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:Arial,sans-serif;}
+    canvas{display:block}
+    
+    #ui {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      pointer-events: none;
+      z-index: 100;
+    }
+    
+    #controls {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      color: #fff;
+      background: rgba(0,0,0,0.8);
+      padding: 15px;
+      border-radius: 8px;
+      pointer-events: auto;
+      font-size: 14px;
+      max-width: 250px;
+    }
+    
+    #minimap-container {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      border: 3px solid #444;
+      border-radius: 8px;
+      background: rgba(0,0,0,0.9);
+      pointer-events: auto;
+    }
+    
+    #minimap {
+      display: block;
+      border-radius: 5px;
+    }
+    
+    #camera-info {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      color: #fff;
+      background: rgba(0,0,0,0.8);
+      padding: 10px;
+      border-radius: 5px;
+      font-size: 16px;
+      font-weight: bold;
+    }
+    
+    #goal-indicator {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #00ff00;
+      font-size: 24px;
+      font-weight: bold;
+      text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
+      opacity: 0;
+      transition: opacity 0.5s;
+    }
+    
+    #physics-debug {
+      position: absolute;
+      bottom: 20px;
+      left: 20px;
+      color: #fff;
+      background: rgba(0,0,0,0.8);
+      padding: 10px;
+      border-radius: 5px;
+      font-family: monospace;
+      font-size: 12px;
+      display: none;
+    }
+    .control-key {
+      background: rgba(255,255,255,0.2);
+      padding: 2px 6px;
+      border-radius: 3px;
+      font-family: monospace;
+    }
+  </style>
+</head>
+<body>
+<div id="ui">
+  <div id="controls">
+    <div><strong>🎮 Controls</strong></div>
+    <div><span class="control-key">WASD</span> / <span class="control-key">Arrows</span> - Move</div>
+    <div><span class="control-key">C</span> - Switch Camera</div>
+    <div><span class="control-key">M</span> - Toggle Minimap</div>
+    <div><span class="control-key">R</span> - New Maze</div>
+    <div><span class="control-key">P</span> - Physics Debug</div>
+    <div style="margin-top:10px;"><strong>🎯 Goal:</strong> Find the green exit!</div>
+    <div style="margin-top:5px;font-size:11px;opacity:0.8;">
+      <em>Physics: Momentum, inertia & friction enabled!</em>
+    </div>
+  </div>
+  
+  <div id="camera-info">Third Person</div>
+  
+  <div id="minimap-container">
+    <canvas id="minimap" width="200" height="200"></canvas>
+  </div>
+  
+  <div id="goal-indicator">🎉 MAZE COMPLETED! 🎉</div>
+  
+  <div id="physics-debug">
+    <div><strong>Physics Debug</strong></div>
+    <div>Speed: <span id="debug-speed">0.00</span> m/s</div>
+    <div>Velocity: (<span id="debug-vx">0.00</span>, <span id="debug-vz">0.00</span>)</div>
+    <div>Accel: (<span id="debug-ax">0.00</span>, <span id="debug-az">0.00</span>)</div>
+    <div>Input: (<span id="debug-ix">0</span>, <span id="debug-iz">0</span>)</div>
+  </div>
+</div>
+
+<!-- Three.js CDN -->
+<script src="https://unpkg.com/three@0.150.1/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.150.1/examples/js/controls/OrbitControls.js"></script>
+
+<script>
+try {
+  /***** ──────────────────────────────────────────────────
+    * ADVANCED ECS ARCHITECTURE
+    * ────────────────────────────────────────────────── */
+  
+  // Component registry
+  const ComponentTypes = {
+    TRANSFORM: 'transform',
+    VELOCITY: 'velocity',
+    PHYSICS: 'physics',
+    RENDER: 'render',
+    PLAYER: 'player',
+    CAMERA_TARGET: 'camera_target',
+    GOAL: 'goal',
+    LIGHT: 'light'
+  };
+
+  // ECS World
+  class ECSWorld {
+    constructor() {
+      this.entities = new Map();
+      this.components = new Map();
+      this.systems = [];
+      this.nextEntityId = 1;
+      
+      // Initialize component storage
+      Object.values(ComponentTypes).forEach(type => {
+        this.components.set(type, new Map());
+      });
+    }
+    
+    createEntity() {
+      const id = this.nextEntityId++;
+      this.entities.set(id, new Set());
+      return id;
+    }
+    
+    addComponent(entityId, componentType, data = {}) {
+      if (!this.entities.has(entityId)) return false;
+      
+      this.entities.get(entityId).add(componentType);
+      this.components.get(componentType).set(entityId, data);
+      return true;
+    }
+    
+    getComponent(entityId, componentType) {
+      return this.components.get(componentType).get(entityId);
+    }
+    
+    hasComponent(entityId, componentType) {
+      return this.entities.has(entityId) && this.entities.get(entityId).has(componentType);
+    }
+    
+    removeComponent(entityId, componentType) {
+      if (this.entities.has(entityId)) {
+        this.entities.get(entityId).delete(componentType);
+        this.components.get(componentType).delete(entityId);
+      }
+    }
+    
+    query(componentTypes) {
+      const results = [];
+      for (const [entityId, entityComponents] of this.entities) {
+        if (componentTypes.every(type => entityComponents.has(type))) {
+          results.push(entityId);
+        }
+      }
+      return results;
+    }
+    
+    addSystem(systemFunction) {
+      this.systems.push(systemFunction);
+    }
+    
+    update(deltaTime) {
+      this.systems.forEach(system => system(this, deltaTime));
+    }
+  }
+
+  /***** ──────────────────────────────────────────────────
+    * MAZE GENERATION WITH GUARANTEED SOLUTION
+    * ────────────────────────────────────────────────── */
+  
+  function generateSolvableMaze(cols, rows) {
+    // Initialize grid
+    const grid = Array(rows).fill(0).map(() => 
+      Array(cols).fill(0).map(() => ({ 
+        visited: false, 
+        walls: [true, true, true, true], // up, right, down, left
+        isPath: false
+      }))
+    );
+    
+    // Depth-first search to create maze
+    const stack = [];
+    let current = {r: 0, c: 0};
+    grid[0][0].visited = true;
+    
+    const directions = [
+      [-1, 0, 0, 2], // up
+      [0, 1, 1, 3],  // right
+      [1, 0, 2, 0],  // down
+      [0, -1, 3, 1]  // left
+    ];
+    
+    do {
+      const {r, c} = current;
+      
+      const neighbors = directions.filter(([dr, dc]) => {
+        const nr = r + dr;
+        const nc = c + dc;
+        return nr >= 0 && nr < rows && nc >= 0 && nc < cols && !grid[nr][nc].visited;
+      });
+      
+      if (neighbors.length > 0) {
+        const [dr, dc, wallIdx, oppositeIdx] = neighbors[Math.floor(Math.random() * neighbors.length)];
+        const nr = r + dr;
+        const nc = c + dc;
+        
+        grid[r][c].walls[wallIdx] = false;
+        grid[nr][nc].visited = true;
+        grid[nr][nc].walls[oppositeIdx] = false;
+        
+        stack.push(current);
+        current = {r: nr, c: nc};
+      } else {
+        current = stack.pop();
+      }
+    } while (stack.length > 0);
+    
+    // Verify path exists from start to end using BFS
+    const start = {r: 0, c: 0};
+    const end = {r: rows - 1, c: cols - 1};
+    
+    function hasPath() {
+      const visited = Array(rows).fill(0).map(() => Array(cols).fill(false));
+      const queue = [start];
+      visited[start.r][start.c] = true;
+      
+      while (queue.length > 0) {
+        const {r, c} = queue.shift();
+        
+        if (r === end.r && c === end.c) return true;
+        
+        directions.forEach(([dr, dc, wallIdx], i) => {
+          const nr = r + dr;
+          const nc = c + dc;
+          
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && 
+              !visited[nr][nc] && !grid[r][c].walls[wallIdx]) {
+            visited[nr][nc] = true;
+            queue.push({r: nr, c: nc});
+          }
+        });
+      }
+      return false;
+    }
+    
+    // If no path exists, create one (shouldn't happen with DFS, but safety check)
+    if (!hasPath()) {
+      console.warn('Generated maze has no solution, creating emergency path');
+      // Force remove walls to create a path
+      for (let r = 0; r < rows - 1; r++) {
+        grid[r][0].walls[2] = false; // down
+        grid[r + 1][0].walls[0] = false; // up
+      }
+      for (let c = 0; c < cols - 1; c++) {
+        grid[rows - 1][c].walls[1] = false; // right
+        grid[rows - 1][c + 1].walls[3] = false; // left
+      }
+    }
+    
+    return { grid, start, end };
+  }
+
+  /***** ──────────────────────────────────────────────────
+    * CAMERA SYSTEM
+    * ────────────────────────────────────────────────── */
+  
+  const CameraMode = {
+    THIRD_PERSON: 'third_person',
+    FIRST_PERSON: 'first_person'
+  };
+  
+  class CameraSystem {
+    constructor(camera) {
+      this.camera = camera;
+      this.mode = CameraMode.THIRD_PERSON;
+      this.targetEntity = null;
+      this.offset = new THREE.Vector3(0, 4, 6);
+      this.firstPersonOffset = new THREE.Vector3(0, 0.5, 0);
+      this.smoothness = 0.1;
+    }
+    
+    setTarget(entityId) {
+      this.targetEntity = entityId;
+    }
+    
+    toggleMode() {
+      this.mode = this.mode === CameraMode.THIRD_PERSON ? 
+                  CameraMode.FIRST_PERSON : CameraMode.THIRD_PERSON;
+      
+      document.getElementById('camera-info').textContent = 
+        this.mode === CameraMode.THIRD_PERSON ? 'Third Person' : 'First Person';
+    }
+    
+    update(world) {
+      if (!this.targetEntity) return;
+      
+      const transform = world.getComponent(this.targetEntity, ComponentTypes.TRANSFORM);
+      if (!transform) return;
+      
+      const targetPos = new THREE.Vector3(transform.x, transform.y, transform.z);
+      
+      if (this.mode === CameraMode.THIRD_PERSON) {
+        const desiredPos = targetPos.clone().add(this.offset);
+        this.camera.position.lerp(desiredPos, this.smoothness);
+        this.camera.lookAt(targetPos);
+      } else {
+        // First person
+        const desiredPos = targetPos.clone().add(this.firstPersonOffset);
+        this.camera.position.lerp(desiredPos, this.smoothness * 2);
+        
+        // Look in movement direction or forward
+        const velocity = world.getComponent(this.targetEntity, ComponentTypes.VELOCITY);
+        if (velocity && (Math.abs(velocity.vx) > 0.1 || Math.abs(velocity.vz) > 0.1)) {
+          const lookAt = targetPos.clone().add(new THREE.Vector3(velocity.vx, 0, velocity.vz).normalize());
+          this.camera.lookAt(lookAt);
+        } else {
+          this.camera.lookAt(targetPos.x, targetPos.y, targetPos.z - 1);
+        }
+      }
+    }
+  }
+
+  /***** ──────────────────────────────────────────────────
+    * MINIMAP WITH FOG OF WAR
+    * ────────────────────────────────────────────────── */
+  
+  class MinimapSystem {
+    constructor(canvasId, maze, cols, rows) {
+      this.canvas = document.getElementById(canvasId);
+      this.ctx = this.canvas.getContext('2d');
+      this.maze = maze;
+      this.cols = cols;
+      this.rows = rows;
+      this.cellSize = this.canvas.width / Math.max(cols, rows);
+      this.exploredCells = new Set();
+      this.visible = true;
+      this.playerEntity = null;
+      this.goalPos = null;
+    }
+    
+    setPlayer(entityId) {
+      this.playerEntity = entityId;
+    }
+    
+    setGoal(position) {
+      this.goalPos = position;
+    }
+    
+    toggle() {
+      this.visible = !this.visible;
+      document.getElementById('minimap-container').style.display = 
+        this.visible ? 'block' : 'none';
+    }
+    
+    markExplored(row, col, radius = 1) {
+      for (let r = Math.max(0, row - radius); r <= Math.min(this.rows - 1, row + radius); r++) {
+        for (let c = Math.max(0, col - radius); c <= Math.min(this.cols - 1, col + radius); c++) {
+          this.exploredCells.add(`${r},${c}`);
+        }
+      }
+    }
+    
+    update(world) {
+      if (!this.visible || !this.playerEntity) return;
+      
+      const transform = world.getComponent(this.playerEntity, ComponentTypes.TRANSFORM);
+      if (!transform) return;
+      
+      // Convert world position to grid position
+      const gridX = Math.floor((transform.x + this.cols) / 2);
+      const gridZ = Math.floor((transform.z + this.rows) / 2);
+      
+      // Mark current area as explored
+      this.markExplored(gridZ, gridX, 1);
+      
+      this.render(gridZ, gridX);
+    }
+    
+    render(playerRow, playerCol) {
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
+      
+      // Draw explored areas
+      for (let r = 0; r < this.rows; r++) {
+        for (let c = 0; c < this.cols; c++) {
+          const x = c * this.cellSize;
+          const y = r * this.cellSize;
+          
+          if (this.exploredCells.has(`${r},${c}`)) {
+            // Draw floor
+            this.ctx.fillStyle = '#333';
+            this.ctx.fillRect(x, y, this.cellSize, this.cellSize);
+            
+            // Draw walls
+            this.ctx.strokeStyle = '#666';
+            this.ctx.lineWidth = 2;
+            this.ctx.beginPath();
+            
+            const cell = this.maze.grid[r][c];
+            if (cell.walls[0]) { // top
+              this.ctx.moveTo(x, y);
+              this.ctx.lineTo(x + this.cellSize, y);
+            }
+            if (cell.walls[1]) { // right
+              this.ctx.moveTo(x + this.cellSize, y);
+              this.ctx.lineTo(x + this.cellSize, y + this.cellSize);
+            }
+            if (cell.walls[2]) { // bottom
+              this.ctx.moveTo(x + this.cellSize, y + this.cellSize);
+              this.ctx.lineTo(x, y + this.cellSize);
+            }
+            if (cell.walls[3]) { // left
+              this.ctx.moveTo(x, y + this.cellSize);
+              this.ctx.lineTo(x, y);
+            }
+            this.ctx.stroke();
+          } else {
+            // Fog of war
+            this.ctx.fillStyle = '#111';
+            this.ctx.fillRect(x, y, this.cellSize, this.cellSize);
+          }
+        }
+      }
+      
+      // Draw goal if explored
+      if (this.goalPos && this.exploredCells.has(`${this.goalPos.r},${this.goalPos.c}`)) {
+        const goalX = this.goalPos.c * this.cellSize + this.cellSize / 2;
+        const goalY = this.goalPos.r * this.cellSize + this.cellSize / 2;
+        
+        this.ctx.fillStyle = '#00ff00';
+        this.ctx.beginPath();
+        this.ctx.arc(goalX, goalY, this.cellSize / 3, 0, Math.PI * 2);
+        this.ctx.fill();
+      }
+      
+      // Draw player
+      if (playerRow >= 0 && playerRow < this.rows && playerCol >= 0 && playerCol < this.cols) {
+        const playerX = playerCol * this.cellSize + this.cellSize / 2;
+        const playerY = playerRow * this.cellSize + this.cellSize / 2;
+        
+        this.ctx.fillStyle = '#ffff00';
+        this.ctx.beginPath();
+        this.ctx.arc(playerX, playerY, this.cellSize / 4, 0, Math.PI * 2);
+        this.ctx.fill();
+        
+        // Player direction indicator
+        this.ctx.strokeStyle = '#ffff00';
+        this.ctx.lineWidth = 2;
+        this.ctx.beginPath();
+        this.ctx.moveTo(playerX, playerY);
+        this.ctx.lineTo(playerX, playerY - this.cellSize / 3);
+        this.ctx.stroke();
+      }
+    }
+  }
+
+  /***** ──────────────────────────────────────────────────
+    * SCENE SETUP
+    * ────────────────────────────────────────────────── */
+  
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.FogExp2(0x000000, 0.05);
+
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
+  document.body.appendChild(renderer.domElement);
+
+  // Lighting
+  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  directionalLight.position.set(10, 20, 10);
+  directionalLight.castShadow = true;
+  directionalLight.shadow.mapSize.width = 2048;
+  directionalLight.shadow.mapSize.height = 2048;
+  scene.add(directionalLight);
+
+  /***** ──────────────────────────────────────────────────
+    * GAME STATE
+    * ────────────────────────────────────────────────── */
+  
+  let world, cameraSystem, minimapSystem;
+  let COLS = 20, ROWS = 20, CELL_SIZE = 2;
+  let maze, walls = [];
+  let playerEntity, goalEntity;
+  let gameCompleted = false;
+  let physicsDebugEnabled = false;
+
+  function initializeGame() {
+    // Create ECS World
+    world = new ECSWorld();
+    
+    // Generate maze
+    maze = generateSolvableMaze(COLS, ROWS);
+    
+    // Create camera system
+    cameraSystem = new CameraSystem(camera);
+    
+    // Create minimap
+    minimapSystem = new MinimapSystem('minimap', maze, COLS, ROWS);
+    minimapSystem.setGoal(maze.end);
+    
+    // Clear scene
+    while(scene.children.length > 0) {
+      scene.remove(scene.children[0]);
+    }
+    
+    // Re-add lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+    scene.add(directionalLight);
+    
+    buildMazeGeometry();
+    createPlayer();
+    createGoal();
+    
+    cameraSystem.setTarget(playerEntity);
+    minimapSystem.setPlayer(playerEntity);
+    
+    // Setup systems
+    setupSystems();
+    
+    gameCompleted = false;
+    document.getElementById('goal-indicator').style.opacity = '0';
+  }
+
+  function buildMazeGeometry() {
+    walls = [];
+    
+    // Materials
+    const wallMaterial = new THREE.MeshLambertMaterial({ color: 0x666666 });
+    const floorMaterial = new THREE.MeshLambertMaterial({ color: 0x222222 });
+    
+    // Floor
+    const floor = new THREE.Mesh(
+      new THREE.PlaneGeometry(COLS * CELL_SIZE, ROWS * CELL_SIZE),
+      floorMaterial
+    );
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+    
+    // Walls
+    const wallGeometry = new THREE.BoxGeometry(CELL_SIZE, 1.5, 0.2);
+    
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const cell = maze.grid[r][c];
+        const x = (c - COLS / 2 + 0.5) * CELL_SIZE;
+        const z = (r - ROWS / 2 + 0.5) * CELL_SIZE;
+        
+        // Create walls based on cell walls
+        if (cell.walls[0]) { // top
+          const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+          wall.position.set(x, 0.75, z - CELL_SIZE / 2);
+          wall.castShadow = true;
+          scene.add(wall);
+          walls.push({ x, z: z - CELL_SIZE / 2, horizontal: true });
+        }
+        
+        if (cell.walls[3]) { // left
+          const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+          wall.rotation.y = Math.PI / 2;
+          wall.position.set(x - CELL_SIZE / 2, 0.75, z);
+          wall.castShadow = true;
+          scene.add(wall);
+          walls.push({ x: x - CELL_SIZE / 2, z, horizontal: false });
+        }
+        
+        // Boundary walls
+        if (r === ROWS - 1 && cell.walls[2]) {
+          const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+          wall.position.set(x, 0.75, z + CELL_SIZE / 2);
+          wall.castShadow = true;
+          scene.add(wall);
+          walls.push({ x, z: z + CELL_SIZE / 2, horizontal: true });
+        }
+        
+        if (c === COLS - 1 && cell.walls[1]) {
+          const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+          wall.rotation.y = Math.PI / 2;
+          wall.position.set(x + CELL_SIZE / 2, 0.75, z);
+          wall.castShadow = true;
+          scene.add(wall);
+          walls.push({ x: x + CELL_SIZE / 2, z, horizontal: false });
+        }
+      }
+    }
+  }
+
+  function createPlayer() {
+    playerEntity = world.createEntity();
+    
+    // Start position
+    const startX = -(COLS / 2 - 0.5) * CELL_SIZE;
+    const startZ = -(ROWS / 2 - 0.5) * CELL_SIZE;
+    
+    world.addComponent(playerEntity, ComponentTypes.TRANSFORM, {
+      x: startX, y: 0.4, z: startZ
+    });
+    
+    world.addComponent(playerEntity, ComponentTypes.VELOCITY, {
+      vx: 0, vz: 0
+    });
+    
+    world.addComponent(playerEntity, ComponentTypes.PHYSICS, {
+      mass: 1.0,              // kg
+      acceleration: { x: 0, z: 0 }, // m/s²
+      maxSpeed: 5.0,          // m/s (reduced from 6.0)
+      moveForce: 12.0,        // N (reduced from 15.0)
+      friction: 0.88,         // friction coefficient (increased for smoother stopping)
+      airResistance: 0.92,    // air resistance coefficient (increased)
+      groundFriction: 0.85,   // ground friction when moving (increased)
+      isGrounded: true
+    });
+    
+    world.addComponent(playerEntity, ComponentTypes.PLAYER, {});
+    
+    // Create visual
+    const geometry = new THREE.SphereGeometry(0.3, 16, 16);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0xffff00,
+      emissive: 0x444400,
+      emissiveIntensity: 0.3,
+      roughness: 0.4,
+      metalness: 0.1
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    
+    world.addComponent(playerEntity, ComponentTypes.RENDER, { mesh });
+    
+    // Player light
+    const light = new THREE.PointLight(0xffff88, 1.5, 10);
+    mesh.add(light);
+    world.addComponent(playerEntity, ComponentTypes.LIGHT, { light });
+    
+    scene.add(mesh);
+  }
+
+  function createGoal() {
+    goalEntity = world.createEntity();
+    
+    const goalX = (maze.end.c - COLS / 2 + 0.5) * CELL_SIZE;
+    const goalZ = (maze.end.r - ROWS / 2 + 0.5) * CELL_SIZE;
+    
+    world.addComponent(goalEntity, ComponentTypes.TRANSFORM, {
+      x: goalX, y: 0.5, z: goalZ
+    });
+    
+    world.addComponent(goalEntity, ComponentTypes.GOAL, {});
+    
+    // Create visual - glowing green cylinder
+    const geometry = new THREE.CylinderGeometry(0.4, 0.4, 1, 8);
+    const material = new THREE.MeshStandardMaterial({
+      color: 0x00ff00,
+      emissive: 0x004400,
+      emissiveIntensity: 0.5
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    
+    world.addComponent(goalEntity, ComponentTypes.RENDER, { mesh });
+    
+    // Goal light
+    const light = new THREE.PointLight(0x00ff00, 2, 8);
+    light.position.set(0, 1, 0);
+    mesh.add(light);
+    
+    scene.add(mesh);
+  }
+
+  /***** ──────────────────────────────────────────────────
+    * ECS SYSTEMS
+    * ────────────────────────────────────────────────── */
+  
+  function setupSystems() {
+    // Input System - Apply forces based on input
+    world.addSystem((world, deltaTime) => {
+      const players = world.query([ComponentTypes.PLAYER, ComponentTypes.PHYSICS]);
+      
+      for (const entityId of players) {
+        const physics = world.getComponent(entityId, ComponentTypes.PHYSICS);
+        
+        // Reset acceleration
+        physics.acceleration.x = 0;
+        physics.acceleration.z = 0;
+        
+        // Calculate input direction
+        let inputX = 0, inputZ = 0;
+        if (keyState['KeyD'] || keyState['ArrowRight']) inputX += 1;
+        if (keyState['KeyA'] || keyState['ArrowLeft']) inputX -= 1;
+        if (keyState['KeyS'] || keyState['ArrowDown']) inputZ += 1;
+        if (keyState['KeyW'] || keyState['ArrowUp']) inputZ -= 1;
+        
+        // Normalize input vector
+        const inputLength = Math.sqrt(inputX * inputX + inputZ * inputZ);
+        if (inputLength > 0) {
+          inputX /= inputLength;
+          inputZ /= inputLength;
+          
+          // Apply movement force
+          const force = physics.moveForce;
+          physics.acceleration.x += (inputX * force) / physics.mass;
+          physics.acceleration.z += (inputZ * force) / physics.mass;
+        }
+      }
+    });
+    
+    // Physics System - Handle acceleration, velocity, and friction
+    world.addSystem((world, deltaTime) => {
+      const physicsEntities = world.query([ComponentTypes.VELOCITY, ComponentTypes.PHYSICS]);
+      
+      // Cap deltaTime to prevent large jumps
+      deltaTime = Math.min(deltaTime, 1/30); // Max 30fps equivalent
+      
+      for (const entityId of physicsEntities) {
+        const velocity = world.getComponent(entityId, ComponentTypes.VELOCITY);
+        const physics = world.getComponent(entityId, ComponentTypes.PHYSICS);
+        
+        // Apply acceleration to velocity
+        velocity.vx += physics.acceleration.x * deltaTime;
+        velocity.vz += physics.acceleration.z * deltaTime;
+        
+        // Apply smooth friction using exponential decay
+        const frictionFactor = Math.pow(physics.airResistance, deltaTime * 10);
+        velocity.vx *= frictionFactor;
+        velocity.vz *= frictionFactor;
+        
+        // Apply ground friction when on ground and moving
+        if (physics.isGrounded) {
+          const groundFrictionFactor = Math.pow(physics.groundFriction, deltaTime * 8);
+          velocity.vx *= groundFrictionFactor;
+          velocity.vz *= groundFrictionFactor;
+        }
+        
+        // Speed limiting with smooth transition
+        const currentSpeed = Math.sqrt(velocity.vx * velocity.vx + velocity.vz * velocity.vz);
+        if (currentSpeed > physics.maxSpeed) {
+          const scale = physics.maxSpeed / currentSpeed;
+          velocity.vx *= scale * 0.95; // Slightly softer limiting
+          velocity.vz *= scale * 0.95;
+        }
+        
+        // Stop very small velocities to prevent micro-jitter
+        if (Math.abs(velocity.vx) < 0.02) velocity.vx = 0;
+        if (Math.abs(velocity.vz) < 0.02) velocity.vz = 0;
+      }
+    });
+    
+    // Movement System - Apply velocities with collision detection
+    world.addSystem((world, deltaTime) => {
+      const movableEntities = world.query([ComponentTypes.TRANSFORM, ComponentTypes.VELOCITY]);
+      
+      for (const entityId of movableEntities) {
+        const transform = world.getComponent(entityId, ComponentTypes.TRANSFORM);
+        const velocity = world.getComponent(entityId, ComponentTypes.VELOCITY);
+        
+        // Calculate potential new positions
+        const newX = transform.x + velocity.vx * deltaTime;
+        const newZ = transform.z + velocity.vz * deltaTime;
+        
+        // Handle X-axis collision
+        if (!checkCollision(newX, transform.z)) {
+          transform.x = newX;
+        } else {
+          // Simple collision response - just stop movement
+          velocity.vx *= -0.1; // Very small bounce back
+          velocity.vx *= 0.3;  // Lose most energy
+        }
+        
+        // Handle Z-axis collision
+        if (!checkCollision(transform.x, newZ)) {
+          transform.z = newZ;
+        } else {
+          // Simple collision response - just stop movement
+          velocity.vz *= -0.1; // Very small bounce back
+          velocity.vz *= 0.3;  // Lose most energy
+        }
+        
+        // Boundary constraints with simple stopping
+        const halfSize = Math.max(COLS, ROWS) * CELL_SIZE / 2 - 0.5;
+        
+        if (transform.x < -halfSize) {
+          transform.x = -halfSize;
+          velocity.vx = Math.max(0, velocity.vx); // Only allow moving away from boundary
+        } else if (transform.x > halfSize) {
+          transform.x = halfSize;
+          velocity.vx = Math.min(0, velocity.vx); // Only allow moving away from boundary
+        }
+        
+        if (transform.z < -halfSize) {
+          transform.z = -halfSize;
+          velocity.vz = Math.max(0, velocity.vz); // Only allow moving away from boundary
+        } else if (transform.z > halfSize) {
+          transform.z = halfSize;
+          velocity.vz = Math.min(0, velocity.vz); // Only allow moving away from boundary
+        }
+      }
+    });
+    
+    // Render System
+    world.addSystem((world, deltaTime) => {
+      const renderableEntities = world.query([ComponentTypes.TRANSFORM, ComponentTypes.RENDER]);
+      
+      for (const entityId of renderableEntities) {
+        const transform = world.getComponent(entityId, ComponentTypes.TRANSFORM);
+        const render = world.getComponent(entityId, ComponentTypes.RENDER);
+        
+        if (render.mesh) {
+          // Simple, smooth position update
+          render.mesh.position.set(transform.x, transform.y, transform.z);
+          
+          // Add subtle rotation based on movement for the player (much smoother)
+          if (world.hasComponent(entityId, ComponentTypes.PLAYER)) {
+            const velocity = world.getComponent(entityId, ComponentTypes.VELOCITY);
+            
+            // Very subtle rotation effect
+            render.mesh.rotation.x += velocity.vz * deltaTime * 0.5;
+            render.mesh.rotation.z -= velocity.vx * deltaTime * 0.5;
+            
+            // No bobbing - keep it stable
+            render.mesh.position.y = transform.y;
+          }
+        }
+      }
+    });
+    
+    // Goal System
+    world.addSystem((world, deltaTime) => {
+      if (gameCompleted) return;
+      
+      const players = world.query([ComponentTypes.PLAYER, ComponentTypes.TRANSFORM]);
+      const goals = world.query([ComponentTypes.GOAL, ComponentTypes.TRANSFORM]);
+      
+      for (const playerId of players) {
+        const playerTransform = world.getComponent(playerId, ComponentTypes.TRANSFORM);
+        
+        for (const goalId of goals) {
+          const goalTransform = world.getComponent(goalId, ComponentTypes.TRANSFORM);
+          
+          const distance = Math.sqrt(
+            Math.pow(playerTransform.x - goalTransform.x, 2) +
+            Math.pow(playerTransform.z - goalTransform.z, 2)
+          );
+          
+          if (distance < 1.0) {
+            gameCompleted = true;
+            document.getElementById('goal-indicator').style.opacity = '1';
+            setTimeout(() => {
+              document.getElementById('goal-indicator').style.opacity = '0';
+            }, 3000);
+          }
+        }
+      }
+    });
+    
+    // UI Update System - Update physics debug only
+    world.addSystem((world, deltaTime) => {
+      if (!physicsDebugEnabled) return;
+      
+      const players = world.query([ComponentTypes.PLAYER, ComponentTypes.VELOCITY, ComponentTypes.PHYSICS]);
+      
+      for (const playerId of players) {
+        const velocity = world.getComponent(playerId, ComponentTypes.VELOCITY);
+        const physics = world.getComponent(playerId, ComponentTypes.PHYSICS);
+        
+        // Calculate current speed
+        const speed = Math.sqrt(velocity.vx * velocity.vx + velocity.vz * velocity.vz);
+        
+        // Update physics debug display
+        document.getElementById('debug-speed').textContent = speed.toFixed(2);
+        document.getElementById('debug-vx').textContent = velocity.vx.toFixed(2);
+        document.getElementById('debug-vz').textContent = velocity.vz.toFixed(2);
+        document.getElementById('debug-ax').textContent = physics.acceleration.x.toFixed(2);
+        document.getElementById('debug-az').textContent = physics.acceleration.z.toFixed(2);
+        
+        // Show current input
+        let inputX = 0, inputZ = 0;
+        if (keyState['KeyD'] || keyState['ArrowRight']) inputX += 1;
+        if (keyState['KeyA'] || keyState['ArrowLeft']) inputX -= 1;
+        if (keyState['KeyS'] || keyState['ArrowDown']) inputZ += 1;
+        if (keyState['KeyW'] || keyState['ArrowUp']) inputZ -= 1;
+        
+        document.getElementById('debug-ix').textContent = inputX;
+        document.getElementById('debug-iz').textContent = inputZ;
+        
+        break; // Only process first player
+      }
+    });
+  }
+
+  function checkCollision(x, z, radius = 0.3) {
+    const buffer = 0.1;
+    
+    for (const wall of walls) {
+      const dx = Math.abs(x - wall.x);
+      const dz = Math.abs(z - wall.z);
+      
+      if (wall.horizontal) {
+        if (dz < radius + buffer && dx < CELL_SIZE / 2 + radius) {
+          return true;
+        }
+      } else {
+        if (dx < radius + buffer && dz < CELL_SIZE / 2 + radius) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /***** ──────────────────────────────────────────────────
+    * INPUT HANDLING
+    * ────────────────────────────────────────────────── */
+  
+  const keyState = {};
+  
+  window.addEventListener('keydown', (e) => {
+    keyState[e.code] = true;
+    
+    if (e.code === 'KeyC') {
+      cameraSystem.toggleMode();
+    } else if (e.code === 'KeyM') {
+      minimapSystem.toggle();
+    } else if (e.code === 'KeyR') {
+      initializeGame();
+    } else if (e.code === 'KeyP') {
+      physicsDebugEnabled = !physicsDebugEnabled;
+      document.getElementById('physics-debug').style.display = 
+        physicsDebugEnabled ? 'block' : 'none';
+    }
+  });
+  
+  window.addEventListener('keyup', (e) => {
+    keyState[e.code] = false;
+  });
+  
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth / window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+
+  /***** ──────────────────────────────────────────────────
+    * MAIN GAME LOOP
+    * ────────────────────────────────────────────────── */
+  
+  let lastTime = performance.now();
+  
+  function gameLoop(currentTime) {
+    const rawDeltaTime = (currentTime - lastTime) / 1000;
+    lastTime = currentTime;
+    
+    // Smooth deltaTime to prevent huge jumps and ensure consistent physics
+    const deltaTime = Math.min(rawDeltaTime, 1/30); // Cap at ~30fps minimum
+    
+    // Update ECS systems
+    world.update(deltaTime);
+    
+    // Update camera
+    cameraSystem.update(world);
+    
+    // Update minimap
+    minimapSystem.update(world);
+    
+    // Render
+    renderer.render(scene, camera);
+    
+    requestAnimationFrame(gameLoop);
+  }
+
+  // Initialize and start the game
+  initializeGame();
+  gameLoop(lastTime);
+
+  console.log("🎮 Advanced Physics-Based Maze Game Loaded!");
+  console.log("🚀 Features: Momentum, inertia, friction, and realistic movement!");
+  console.log("🎯 Find the green exit to complete the maze!");
+  console.log("📋 Controls: WASD to move, C for camera, M for minimap, P for physics debug, R for new maze");
+  console.log("⚡ Physics: Feel the acceleration, momentum, and friction as you navigate!");
+
+} catch (error) {
+  console.error("Failed to initialize maze game:", error);
+  document.body.innerHTML = `
+    <div style="color: white; text-align: center; margin-top: 50px; font-family: Arial;">
+      <h2>Failed to load the maze game</h2>
+      <p>Error: ${error.message}</p>
+      <p>Please check the browser console for more details.</p>
+    </div>
+  `;
+}
+</script>
+</body>
+</html>
