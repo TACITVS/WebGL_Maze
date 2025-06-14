@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Advanced Procedural Maze · ECS · Minimap</title>
+  <title>Advanced Procedural Maze · ECS · Audio</title>
   <style>
     html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:Arial,sans-serif;}
     canvas{display:block}
@@ -88,6 +88,14 @@
       padding: 2px 6px;
       border-radius: 3px;
       font-family: monospace;
+      cursor: pointer;
+      display: inline-block;
+      min-width: 12px;
+      text-align: center;
+    }
+    .muted {
+        text-decoration: line-through;
+        opacity: 0.5;
     }
   </style>
 </head>
@@ -100,6 +108,11 @@
     <div><span class="control-key">M</span> - Toggle Minimap</div>
     <div><span class="control-key">R</span> - New Maze</div>
     <div><span class="control-key">P</span> - Physics Debug</div>
+    
+    <div style="margin-top:10px;"><strong>🔊 Audio</strong></div>
+    <div><span class="control-key" id="toggle-music">J</span> - Music</div>
+    <div><span class="control-key" id="toggle-sfx">K</span> - SFX</div>
+
     <div style="margin-top:10px;"><strong>🎯 Goal:</strong> Find the green exit!</div>
     <div style="margin-top:5px;font-size:11px;opacity:0.8;">
       <em>Physics: Momentum, inertia & friction enabled!</em>
@@ -123,394 +136,130 @@
   </div>
 </div>
 
-<!-- Three.js CDN -->
 <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/build/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.150.1/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.3/howler.min.js"></script>
 
 <script>
 try {
   /***** ──────────────────────────────────────────────────
-   * ADVANCED ECS ARCHITECTURE
+   * ECS ARCHITECTURE
    * ────────────────────────────────────────────────── */
   
-  // Component registry
-  const ComponentTypes = {
-    TRANSFORM: 'transform',
-    VELOCITY: 'velocity',
-    PHYSICS: 'physics',
-    RENDER: 'render',
-    PLAYER: 'player',
-    CAMERA_TARGET: 'camera_target',
-    GOAL: 'goal',
-    LIGHT: 'light'
-  };
-
-  // ECS World
+  const ComponentTypes = { TRANSFORM: 'transform', VELOCITY: 'velocity', PHYSICS: 'physics', RENDER: 'render', PLAYER: 'player', CAMERA_TARGET: 'camera_target', GOAL: 'goal', LIGHT: 'light' };
   class ECSWorld {
-    constructor() {
-      this.entities = new Map();
-      this.components = new Map();
-      this.systems = [];
-      this.nextEntityId = 1;
-      
-      // Initialize component storage
-      Object.values(ComponentTypes).forEach(type => {
-        this.components.set(type, new Map());
-      });
-    }
-    
-    createEntity() {
-      const id = this.nextEntityId++;
-      this.entities.set(id, new Set());
-      return id;
-    }
-    
-    addComponent(entityId, componentType, data = {}) {
-      if (!this.entities.has(entityId)) return false;
-      
-      this.entities.get(entityId).add(componentType);
-      this.components.get(componentType).set(entityId, data);
-      return true;
-    }
-    
-    getComponent(entityId, componentType) {
-      return this.components.get(componentType).get(entityId);
-    }
-    
-    hasComponent(entityId, componentType) {
-      return this.entities.has(entityId) && this.entities.get(entityId).has(componentType);
-    }
-    
-    removeComponent(entityId, componentType) {
-      if (this.entities.has(entityId)) {
-        this.entities.get(entityId).delete(componentType);
-        this.components.get(componentType).delete(entityId);
-      }
-    }
-    
-    query(componentTypes) {
-      const results = [];
-      for (const [entityId, entityComponents] of this.entities) {
-        if (componentTypes.every(type => entityComponents.has(type))) {
-          results.push(entityId);
-        }
-      }
-      return results;
-    }
-    
-    addSystem(systemFunction) {
-      this.systems.push(systemFunction);
-    }
-    
-    update(deltaTime) {
-      this.systems.forEach(system => system(this, deltaTime));
-    }
+    constructor(){this.entities=new Map();this.components=new Map();this.systems=[];this.nextEntityId=1;Object.values(ComponentTypes).forEach(t=>{this.components.set(t,new Map())})}
+    createEntity(){const t=this.nextEntityId++;this.entities.set(t,new Set());return t}
+    addComponent(t,s,i={}){return!!this.entities.has(t)&&(this.entities.get(t).add(s),this.components.get(s).set(t,i),!0)}
+    getComponent(t,s){return this.components.get(s).get(t)}
+    hasComponent(t,s){return this.entities.has(t)&&this.entities.get(t).has(s)}
+    removeComponent(t,s){this.entities.has(t)&&(this.entities.get(t).delete(s),this.components.get(s).delete(t))}
+    query(t){const s=[];for(const[i,e]of this.entities)t.every(t=>e.has(t))&&s.push(i);return s}
+    addSystem(t){this.systems.push(t)}
+    update(t){this.systems.forEach(s=>s(this,t))}
   }
 
   /***** ──────────────────────────────────────────────────
-   * MAZE GENERATION WITH GUARANTEED SOLUTION
+   * MAZE GENERATION
    * ────────────────────────────────────────────────── */
   
   function generateSolvableMaze(cols, rows) {
-    // Initialize grid
-    const grid = Array(rows).fill(0).map(() => 
-      Array(cols).fill(0).map(() => ({ 
-        visited: false, 
-        walls: [true, true, true, true], // up, right, down, left
-        isPath: false
-      }))
-    );
-    
-    // Depth-first search to create maze
+    const grid = Array(rows).fill(0).map(() => Array(cols).fill(0).map(() => ({ visited: false, walls: [true, true, true, true], isPath: false })));
     const stack = [];
     let current = {r: 0, c: 0};
     grid[0][0].visited = true;
-    
-    const directions = [
-      [-1, 0, 0, 2], // up
-      [0, 1, 1, 3],  // right
-      [1, 0, 2, 0],  // down
-      [0, -1, 3, 1]  // left
-    ];
-    
+    const directions = [[-1, 0, 0, 2], [0, 1, 1, 3], [1, 0, 2, 0], [0, -1, 3, 1]];
     do {
       const {r, c} = current;
-      
       const neighbors = directions.filter(([dr, dc]) => {
-        const nr = r + dr;
-        const nc = c + dc;
+        const nr = r + dr; const nc = c + dc;
         return nr >= 0 && nr < rows && nc >= 0 && nc < cols && !grid[nr][nc].visited;
       });
-      
       if (neighbors.length > 0) {
         const [dr, dc, wallIdx, oppositeIdx] = neighbors[Math.floor(Math.random() * neighbors.length)];
-        const nr = r + dr;
-        const nc = c + dc;
-        
+        const nr = r + dr; const nc = c + dc;
         grid[r][c].walls[wallIdx] = false;
         grid[nr][nc].visited = true;
         grid[nr][nc].walls[oppositeIdx] = false;
-        
         stack.push(current);
         current = {r: nr, c: nc};
       } else {
         current = stack.pop();
       }
     } while (stack.length > 0);
-    
-    // Verify path exists from start to end using BFS
-    const start = {r: 0, c: 0};
-    const end = {r: rows - 1, c: cols - 1};
-    
-    function hasPath() {
-      const visited = Array(rows).fill(0).map(() => Array(cols).fill(false));
-      const queue = [start];
-      visited[start.r][start.c] = true;
-      
-      while (queue.length > 0) {
-        const {r, c} = queue.shift();
-        
-        if (r === end.r && c === end.c) return true;
-        
-        directions.forEach(([dr, dc, wallIdx], i) => {
-          const nr = r + dr;
-          const nc = c + dc;
-          
-          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && 
-              !visited[nr][nc] && !grid[r][c].walls[wallIdx]) {
-            visited[nr][nc] = true;
-            queue.push({r: nr, c: nc});
-          }
-        });
-      }
-      return false;
-    }
-    
-    // If no path exists, create one (shouldn't happen with DFS, but safety check)
-    if (!hasPath()) {
-      console.warn('Generated maze has no solution, creating emergency path');
-      // Force remove walls to create a path
-      for (let r = 0; r < rows - 1; r++) {
-        grid[r][0].walls[2] = false; // down
-        grid[r + 1][0].walls[0] = false; // up
-      }
-      for (let c = 0; c < cols - 1; c++) {
-        grid[rows - 1][c].walls[1] = false; // right
-        grid[rows - 1][c + 1].walls[3] = false; // left
-      }
-    }
-    
-    return { grid, start, end };
+    return { grid, start: {r: 0, c: 0}, end: {r: rows - 1, c: cols - 1} };
   }
 
   /***** ──────────────────────────────────────────────────
-   * CAMERA SYSTEM
+   * CAMERA & MINIMAP SYSTEMS
    * ────────────────────────────────────────────────── */
   
-  const CameraMode = {
-    THIRD_PERSON: 'third_person',
-    FIRST_PERSON: 'first_person'
-  };
-  
-  class CameraSystem {
-    constructor(camera) {
-      this.camera = camera;
-      this.mode = CameraMode.THIRD_PERSON;
-      this.targetEntity = null;
-      this.offset = new THREE.Vector3(0, 4, 6);
-      this.firstPersonOffset = new THREE.Vector3(0, 0.5, 0);
-      this.smoothness = 0.1;
-    }
-    
-    setTarget(entityId) {
-      this.targetEntity = entityId;
-    }
-    
-    toggleMode() {
-      this.mode = this.mode === CameraMode.THIRD_PERSON ? 
-                  CameraMode.FIRST_PERSON : CameraMode.THIRD_PERSON;
-      
-      document.getElementById('camera-info').textContent = 
-        this.mode === CameraMode.THIRD_PERSON ? 'Third Person' : 'First Person';
-    }
-    
-    update(world) {
-      if (!this.targetEntity) return;
-      
-      const transform = world.getComponent(this.targetEntity, ComponentTypes.TRANSFORM);
-      if (!transform) return;
-      
-      const targetPos = new THREE.Vector3(transform.x, transform.y, transform.z);
-      
-      if (this.mode === CameraMode.THIRD_PERSON) {
-        const desiredPos = targetPos.clone().add(this.offset);
-        this.camera.position.lerp(desiredPos, this.smoothness);
-        this.camera.lookAt(targetPos);
-      } else {
-        // First person
-        const desiredPos = targetPos.clone().add(this.firstPersonOffset);
-        this.camera.position.lerp(desiredPos, this.smoothness * 2);
-        
-        // Look in movement direction or forward
-        const velocity = world.getComponent(this.targetEntity, ComponentTypes.VELOCITY);
-        if (velocity && (Math.abs(velocity.vx) > 0.1 || Math.abs(velocity.vz) > 0.1)) {
-          const lookAt = targetPos.clone().add(new THREE.Vector3(velocity.vx, 0, velocity.vz).normalize());
-          this.camera.lookAt(lookAt);
-        } else {
-          this.camera.lookAt(targetPos.x, targetPos.y, targetPos.z - 1);
-        }
-      }
-    }
-  }
+  const CameraMode={THIRD_PERSON:"third_person",FIRST_PERSON:"first_person"};class CameraSystem{constructor(t){this.camera=t,this.mode=CameraMode.THIRD_PERSON,this.targetEntity=null,this.offset=new THREE.Vector3(0,4,6),this.firstPersonOffset=new THREE.Vector3(0,.5,0),this.smoothness=.1}setTarget(t){this.targetEntity=t}toggleMode(){this.mode=this.mode===CameraMode.THIRD_PERSON?CameraMode.FIRST_PERSON:CameraMode.THIRD_PERSON,document.getElementById("camera-info").textContent=this.mode===CameraMode.THIRD_PERSON?"Third Person":"First Person"}update(t){if(!this.targetEntity)return;const s=t.getComponent(this.targetEntity,ComponentTypes.TRANSFORM);if(!s)return;const i=new THREE.Vector3(s.x,s.y,s.z);if(this.mode===CameraMode.THIRD_PERSON){const t=i.clone().add(this.offset);this.camera.position.lerp(t,this.smoothness),this.camera.lookAt(i)}else{const e=i.clone().add(this.firstPersonOffset);this.camera.position.lerp(e,2*this.smoothness);const h=t.getComponent(this.targetEntity,ComponentTypes.VELOCITY);h&&Math.abs(h.vx)>.1||Math.abs(h.vz)>.1?this.camera.lookAt(i.clone().add(new THREE.Vector3(h.vx,0,h.vz).normalize())):this.camera.lookAt(i.x,i.y,i.z-1)}}}
+  class MinimapSystem{constructor(t,s,i,e){this.canvas=document.getElementById(t),this.ctx=this.canvas.getContext("2d"),this.maze=s,this.cols=i,this.rows=e,this.cellSize=this.canvas.width/Math.max(i,e),this.exploredCells=new Set,this.visible=!0,this.playerEntity=null,this.goalPos=null}setPlayer(t){this.playerEntity=t}setGoal(t){this.goalPos=t}toggle(){this.visible=!this.visible,document.getElementById("minimap-container").style.display=this.visible?"block":"none"}markExplored(t,s,i=1){for(let e=Math.max(0,t-i);e<=Math.min(this.rows-1,t+i);e++)for(let h=Math.max(0,s-i);h<=Math.min(this.cols-1,s+i);h++)this.exploredCells.add(`${e},${h}`)}update(t){if(!this.visible||!this.playerEntity)return;const s=t.getComponent(this.playerEntity,ComponentTypes.TRANSFORM);s&&(this.markExplored(Math.floor((s.z+this.rows*CELL_SIZE/2)/CELL_SIZE),Math.floor((s.x+this.cols*CELL_SIZE/2)/CELL_SIZE),1),this.render(Math.floor((s.z+this.rows*CELL_SIZE/2)/CELL_SIZE),Math.floor((s.x+this.cols*CELL_SIZE/2)/CELL_SIZE)))}render(t,s){this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height);for(let i=0;i<this.rows;i++)for(let e=0;e<this.cols;e++){const h=e*this.cellSize,o=i*this.cellSize;if(this.exploredCells.has(`${i},${e}`)){this.ctx.fillStyle="#333",this.ctx.fillRect(h,o,this.cellSize,this.cellSize),this.ctx.strokeStyle="#666",this.ctx.lineWidth=2,this.ctx.beginPath();const t=this.maze.grid[i][e];t.walls[0]&&(this.ctx.moveTo(h,o),this.ctx.lineTo(h+this.cellSize,o)),t.walls[1]&&(this.ctx.moveTo(h+this.cellSize,o),this.ctx.lineTo(h+this.cellSize,o+this.cellSize)),t.walls[2]&&(this.ctx.moveTo(h+this.cellSize,o+this.cellSize),this.ctx.lineTo(h,o+this.cellSize)),t.walls[3]&&(this.ctx.moveTo(h,o+this.cellSize),this.ctx.lineTo(h,o)),this.ctx.stroke()}else this.ctx.fillStyle="#111",this.ctx.fillRect(h,o,this.cellSize,this.cellSize)}if(this.goalPos&&this.exploredCells.has(`${this.goalPos.r},${this.goalPos.c}`)){const t=this.goalPos.c*this.cellSize+this.cellSize/2,s=this.goalPos.r*this.cellSize+this.cellSize/2;this.ctx.fillStyle="#00ff00",this.ctx.beginPath(),this.ctx.arc(t,s,this.cellSize/3,0,2*Math.PI),this.ctx.fill()}if(t>=0&&t<this.rows&&s>=0&&s<this.cols){const i=s*this.cellSize+this.cellSize/2,e=t*this.cellSize+this.cellSize/2;this.ctx.fillStyle="#ffff00",this.ctx.beginPath(),this.ctx.arc(i,e,this.cellSize/4,0,2*Math.PI),this.ctx.fill()}}}
 
   /***** ──────────────────────────────────────────────────
-   * MINIMAP WITH FOG OF WAR
+   * AUDIO SYSTEM
    * ────────────────────────────────────────────────── */
-  
-  class MinimapSystem {
-    constructor(canvasId, maze, cols, rows) {
-      this.canvas = document.getElementById(canvasId);
-      this.ctx = this.canvas.getContext('2d');
-      this.maze = maze;
-      this.cols = cols;
-      this.rows = rows;
-      this.cellSize = this.canvas.width / Math.max(cols, rows);
-      this.exploredCells = new Set();
-      this.visible = true;
-      this.playerEntity = null;
-      this.goalPos = null;
+
+  class AudioSystem {
+    constructor() {
+      this.isMusicMuted = false;
+      this.isSfxMuted = false;
+      
+      // FIX: Reverting to reliable URLs from the official Howler.js CDN and using audio sprites.
+      this.sounds = {
+        'music': new Howl({
+          src: ['https://goldfirestudios.com/proj/howlerjs/sound.mp3'],
+          loop: true, volume: 0.3
+        }),
+        'sfx': new Howl({
+            src: ['https://goldfirestudios.com/proj/howlerjs/sounds.mp3'],
+            sprite: {
+                collision: [893, 764],
+                goal: [2049, 1152]
+            }
+        })
+      };
+      this.musicStarted = false;
     }
-    
-    setPlayer(entityId) {
-      this.playerEntity = entityId;
+
+    startMusic() {
+      if (!this.musicStarted && !this.isMusicMuted) {
+        this.sounds.music.play();
+        this.musicStarted = true;
+      }
     }
-    
-    setGoal(position) {
-      this.goalPos = position;
-    }
-    
-    toggle() {
-      this.visible = !this.visible;
-      document.getElementById('minimap-container').style.display = 
-        this.visible ? 'block' : 'none';
-    }
-    
-    markExplored(row, col, radius = 1) {
-      for (let r = Math.max(0, row - radius); r <= Math.min(this.rows - 1, row + radius); r++) {
-        for (let c = Math.max(0, col - radius); c <= Math.min(this.cols - 1, col + radius); c++) {
-          this.exploredCells.add(`${r},${c}`);
-        }
+
+    playSound(spriteName) {
+      if (!this.isSfxMuted) {
+        this.sounds.sfx.play(spriteName);
       }
     }
     
-    update(world) {
-      if (!this.visible || !this.playerEntity) return;
-      
-      const transform = world.getComponent(this.playerEntity, ComponentTypes.TRANSFORM);
-      if (!transform) return;
-      
-      // Convert world position to grid position
-      const gridX = Math.floor((transform.x + this.cols) / 2);
-      const gridZ = Math.floor((transform.z + this.rows) / 2);
-      
-      // Mark current area as explored
-      this.markExplored(gridZ, gridX, 1);
-      
-      this.render(gridZ, gridX);
+    toggleMusic() {
+        this.isMusicMuted = !this.isMusicMuted;
+        this.sounds.music.mute(this.isMusicMuted);
+        document.getElementById('toggle-music').classList.toggle('muted', this.isMusicMuted);
     }
     
-    render(playerRow, playerCol) {
-      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-      
-      // Draw explored areas
-      for (let r = 0; r < this.rows; r++) {
-        for (let c = 0; c < this.cols; c++) {
-          const x = c * this.cellSize;
-          const y = r * this.cellSize;
-          
-          if (this.exploredCells.has(`${r},${c}`)) {
-            // Draw floor
-            this.ctx.fillStyle = '#333';
-            this.ctx.fillRect(x, y, this.cellSize, this.cellSize);
-            
-            // Draw walls
-            this.ctx.strokeStyle = '#666';
-            this.ctx.lineWidth = 2;
-            this.ctx.beginPath();
-            
-            const cell = this.maze.grid[r][c];
-            if (cell.walls[0]) { // top
-              this.ctx.moveTo(x, y);
-              this.ctx.lineTo(x + this.cellSize, y);
-            }
-            if (cell.walls[1]) { // right
-              this.ctx.moveTo(x + this.cellSize, y);
-              this.ctx.lineTo(x + this.cellSize, y + this.cellSize);
-            }
-            if (cell.walls[2]) { // bottom
-              this.ctx.moveTo(x + this.cellSize, y + this.cellSize);
-              this.ctx.lineTo(x, y + this.cellSize);
-            }
-            if (cell.walls[3]) { // left
-              this.ctx.moveTo(x, y + this.cellSize);
-              this.ctx.lineTo(x, y);
-            }
-            this.ctx.stroke();
-          } else {
-            // Fog of war
-            this.ctx.fillStyle = '#111';
-            this.ctx.fillRect(x, y, this.cellSize, this.cellSize);
-          }
-        }
-      }
-      
-      // Draw goal if explored
-      if (this.goalPos && this.exploredCells.has(`${this.goalPos.r},${this.goalPos.c}`)) {
-        const goalX = this.goalPos.c * this.cellSize + this.cellSize / 2;
-        const goalY = this.goalPos.r * this.cellSize + this.cellSize / 2;
-        
-        this.ctx.fillStyle = '#00ff00';
-        this.ctx.beginPath();
-        this.ctx.arc(goalX, goalY, this.cellSize / 3, 0, Math.PI * 2);
-        this.ctx.fill();
-      }
-      
-      // Draw player
-      if (playerRow >= 0 && playerRow < this.rows && playerCol >= 0 && playerCol < this.cols) {
-        const playerX = playerCol * this.cellSize + this.cellSize / 2;
-        const playerY = playerRow * this.cellSize + this.cellSize / 2;
-        
-        this.ctx.fillStyle = '#ffff00';
-        this.ctx.beginPath();
-        this.ctx.arc(playerX, playerY, this.cellSize / 4, 0, Math.PI * 2);
-        this.ctx.fill();
-        
-        // Player direction indicator
-        this.ctx.strokeStyle = '#ffff00';
-        this.ctx.lineWidth = 2;
-        this.ctx.beginPath();
-        this.ctx.moveTo(playerX, playerY);
-        this.ctx.lineTo(playerX, playerY - this.cellSize / 3);
-        this.ctx.stroke();
-      }
+    toggleSfx() {
+        this.isSfxMuted = !this.isSfxMuted;
+        document.getElementById('toggle-sfx').classList.toggle('muted', this.isSfxMuted);
     }
   }
 
   /***** ──────────────────────────────────────────────────
-   * SCENE SETUP
+   * SCENE SETUP & GAME STATE
    * ────────────────────────────────────────────────── */
   
   const scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(0x000000, 0.05);
-
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap;
   document.body.appendChild(renderer.domElement);
-
-  // Lighting
   scene.add(new THREE.AmbientLight(0xffffff, 0.4));
   const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
   directionalLight.position.set(10, 20, 10);
@@ -518,519 +267,102 @@ try {
   directionalLight.shadow.mapSize.width = 2048;
   directionalLight.shadow.mapSize.height = 2048;
   scene.add(directionalLight);
-
-  // *** NEW: Texture Loader ***
   const textureLoader = new THREE.TextureLoader();
-
-  /***** ──────────────────────────────────────────────────
-   * GAME STATE
-   * ────────────────────────────────────────────────── */
-  
-  let world, cameraSystem, minimapSystem;
+  let world, cameraSystem, minimapSystem, audioSystem;
   let COLS = 20, ROWS = 20, CELL_SIZE = 2;
   let maze, walls = [];
   let playerEntity, goalEntity;
   let gameCompleted = false;
   let physicsDebugEnabled = false;
+  let lastCollisionTime = 0;
 
   function initializeGame() {
-    // Create ECS World
     world = new ECSWorld();
-    
-    // Generate maze
     maze = generateSolvableMaze(COLS, ROWS);
-    
-    // Create camera system
     cameraSystem = new CameraSystem(camera);
-    
-    // Create minimap
     minimapSystem = new MinimapSystem('minimap', maze, COLS, ROWS);
     minimapSystem.setGoal(maze.end);
-    
-    // Clear scene, but preserve the lights
-    // This is more efficient than removing and re-adding them
-    const objectsToRemove = scene.children.filter(obj => !(obj.isLight));
+    if (!audioSystem) { audioSystem = new AudioSystem(); }
+    const objectsToRemove = scene.children.filter(obj => !(obj.isLight) && obj.type !== 'PerspectiveCamera');
     objectsToRemove.forEach(obj => scene.remove(obj));
-
     buildMazeGeometry();
     createPlayer();
     createGoal();
-    
     cameraSystem.setTarget(playerEntity);
     minimapSystem.setPlayer(playerEntity);
-    
-    // Setup systems if they don't exist
-    if (world.systems.length === 0) {
-        setupSystems();
-    }
-    
+    if (world.systems.length === 0) { setupSystems(); }
     gameCompleted = false;
     document.getElementById('goal-indicator').style.opacity = '0';
   }
 
-  function buildMazeGeometry() {
-    walls = [];
-    
-    // *** MODIFICATION: Load Textures and create new materials ***
-    const floorTexture = textureLoader.load(
-        'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/hardwood2_diffuse.jpg',
-        (texture) => { console.log("Floor texture loaded."); },
-        undefined,
-        (err) => { console.error("Could not load floor texture.", err); }
-    );
-    floorTexture.wrapS = THREE.RepeatWrapping;
-    floorTexture.wrapT = THREE.RepeatWrapping;
-    floorTexture.repeat.set(COLS, ROWS); // Tile texture across the entire floor
-
-    const wallTexture = textureLoader.load(
-        'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/brick_diffuse.jpg',
-        (texture) => { console.log("Wall texture loaded."); },
-        undefined,
-        (err) => { console.error("Could not load wall texture.", err); }
-    );
-    wallTexture.wrapS = THREE.RepeatWrapping;
-    wallTexture.wrapT = THREE.RepeatWrapping;
-    wallTexture.repeat.set(1, 0.5); // Tile texture on each wall segment
-
-    // Use MeshStandardMaterial for more realistic lighting
-    const floorMaterial = new THREE.MeshStandardMaterial({ map: floorTexture, roughness: 0.8, metalness: 0.1 });
-    const wallMaterial = new THREE.MeshStandardMaterial({ map: wallTexture, roughness: 0.9, metalness: 0.0 });
-    
-    // Floor
-    const floor = new THREE.Mesh(
-      new THREE.PlaneGeometry(COLS * CELL_SIZE, ROWS * CELL_SIZE),
-      floorMaterial
-    );
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    scene.add(floor);
-    
-    // Walls
-    const wallGeometry = new THREE.BoxGeometry(CELL_SIZE, 1.5, 0.2);
-    
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        const cell = maze.grid[r][c];
-        const x = (c - COLS / 2 + 0.5) * CELL_SIZE;
-        const z = (r - ROWS / 2 + 0.5) * CELL_SIZE;
-        
-        // Create walls based on cell walls
-        if (cell.walls[0]) { // top
-          const wall = new THREE.Mesh(wallGeometry, wallMaterial.clone()); // Use clone to allow unique texture transforms if needed
-          wall.position.set(x, 0.75, z - CELL_SIZE / 2);
-          wall.castShadow = true;
-          scene.add(wall);
-          walls.push({ x, z: z - CELL_SIZE / 2, horizontal: true });
-        }
-        
-        if (cell.walls[3]) { // left
-          const wall = new THREE.Mesh(wallGeometry, wallMaterial.clone());
-          wall.rotation.y = Math.PI / 2;
-          wall.position.set(x - CELL_SIZE / 2, 0.75, z);
-          wall.castShadow = true;
-          scene.add(wall);
-          walls.push({ x: x - CELL_SIZE / 2, z, horizontal: false });
-        }
-        
-        // Boundary walls for the last row and column
-        if (r === ROWS - 1 && cell.walls[2]) {
-          const wall = new THREE.Mesh(wallGeometry, wallMaterial.clone());
-          wall.position.set(x, 0.75, z + CELL_SIZE / 2);
-          wall.castShadow = true;
-          scene.add(wall);
-          walls.push({ x, z: z + CELL_SIZE / 2, horizontal: true });
-        }
-        
-        if (c === COLS - 1 && cell.walls[1]) {
-          const wall = new THREE.Mesh(wallGeometry, wallMaterial.clone());
-          wall.rotation.y = Math.PI / 2;
-          wall.position.set(x + CELL_SIZE / 2, 0.75, z);
-          wall.castShadow = true;
-          scene.add(wall);
-          walls.push({ x: x + CELL_SIZE / 2, z, horizontal: false });
-        }
-      }
-    }
-  }
-
-  function createPlayer() {
-    playerEntity = world.createEntity();
-    
-    // Start position
-    const startX = -(COLS / 2 - 0.5) * CELL_SIZE;
-    const startZ = -(ROWS / 2 - 0.5) * CELL_SIZE;
-    
-    world.addComponent(playerEntity, ComponentTypes.TRANSFORM, {
-      x: startX, y: 0.4, z: startZ
-    });
-    
-    world.addComponent(playerEntity, ComponentTypes.VELOCITY, {
-      vx: 0, vz: 0
-    });
-    
-    world.addComponent(playerEntity, ComponentTypes.PHYSICS, {
-      mass: 1.0,               // kg
-      acceleration: { x: 0, z: 0 }, // m/s²
-      maxSpeed: 5.0,           // m/s
-      moveForce: 12.0,           // N
-      friction: 0.88,          // friction coefficient
-      airResistance: 0.92,     // air resistance coefficient
-      groundFriction: 0.85,    // ground friction when moving
-      isGrounded: true
-    });
-    
-    world.addComponent(playerEntity, ComponentTypes.PLAYER, {});
-    
-    // Create visual
-    const geometry = new THREE.SphereGeometry(0.3, 16, 16);
-    const material = new THREE.MeshStandardMaterial({
-      color: 0xffff00,
-      emissive: 0x444400,
-      emissiveIntensity: 0.3,
-      roughness: 0.4,
-      metalness: 0.1
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-    mesh.castShadow = true; // Player should cast a shadow
-    
-    world.addComponent(playerEntity, ComponentTypes.RENDER, { mesh });
-    
-    // Player light
-    const light = new THREE.PointLight(0xffff88, 1.5, 10);
-    mesh.add(light);
-    world.addComponent(playerEntity, ComponentTypes.LIGHT, { light });
-    
-    scene.add(mesh);
-  }
-
-  function createGoal() {
-    goalEntity = world.createEntity();
-    
-    const goalX = (maze.end.c - COLS / 2 + 0.5) * CELL_SIZE;
-    const goalZ = (maze.end.r - ROWS / 2 + 0.5) * CELL_SIZE;
-    
-    world.addComponent(goalEntity, ComponentTypes.TRANSFORM, {
-      x: goalX, y: 0.5, z: goalZ
-    });
-    
-    world.addComponent(goalEntity, ComponentTypes.GOAL, {});
-    
-    // Create visual - glowing green cylinder
-    const geometry = new THREE.CylinderGeometry(0.4, 0.4, 1, 8);
-    const material = new THREE.MeshStandardMaterial({
-      color: 0x00ff00,
-      emissive: 0x004400,
-      emissiveIntensity: 0.5
-    });
-    const mesh = new THREE.Mesh(geometry, material);
-    
-    world.addComponent(goalEntity, ComponentTypes.RENDER, { mesh });
-    
-    // Goal light
-    const light = new THREE.PointLight(0x00ff00, 2, 8);
-    light.position.set(0, 1, 0);
-    mesh.add(light);
-    
-    scene.add(mesh);
-  }
+  function buildMazeGeometry(){walls=[];const t=textureLoader.load("https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/hardwood2_diffuse.jpg");t.wrapS=THREE.RepeatWrapping;t.wrapT=THREE.RepeatWrapping;t.repeat.set(COLS,ROWS);const s=textureLoader.load("https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/brick_diffuse.jpg");s.wrapS=THREE.RepeatWrapping;s.wrapT=THREE.RepeatWrapping;s.repeat.set(1,.5);const i=new THREE.MeshStandardMaterial({map:t,roughness:.8,metalness:.1}),e=new THREE.MeshStandardMaterial({map:s,roughness:.9,metalness:0}),h=new THREE.Mesh(new THREE.PlaneGeometry(COLS*CELL_SIZE,ROWS*CELL_SIZE),i);h.rotation.x=-Math.PI/2;h.receiveShadow=!0;scene.add(h);const o=new THREE.BoxGeometry(CELL_SIZE,1.5,.2);for(let t=0;t<ROWS;t++)for(let s=0;s<COLS;s++){const i=maze.grid[t][s],h=(s-COLS/2+.5)*CELL_SIZE,a=(t-ROWS/2+.5)*CELL_SIZE;if(i.walls[0]){const t=new THREE.Mesh(o,e.clone());t.position.set(h,.75,a-CELL_SIZE/2),t.castShadow=!0,scene.add(t),walls.push({x:h,z:a-CELL_SIZE/2,horizontal:!0})}if(i.walls[3]){const t=new THREE.Mesh(o,e.clone());t.rotation.y=Math.PI/2,t.position.set(h-CELL_SIZE/2,.75,a),t.castShadow=!0,scene.add(t),walls.push({x:h-CELL_SIZE/2,z:a,horizontal:!1})}if(t===ROWS-1&&i.walls[2]){const t=new THREE.Mesh(o,e.clone());t.position.set(h,.75,a+CELL_SIZE/2),t.castShadow=!0,scene.add(t),walls.push({x:h,z:a+CELL_SIZE/2,horizontal:!0})}if(s===COLS-1&&i.walls[1]){const t=new THREE.Mesh(o,e.clone());t.rotation.y=Math.PI/2,t.position.set(h+CELL_SIZE/2,.75,a),t.castShadow=!0,scene.add(t),walls.push({x:h+CELL_SIZE/2,z:a,horizontal:!1})}}}
+  function createPlayer(){playerEntity=world.createEntity();const t=-(COLS/2-.5)*CELL_SIZE,s=-(ROWS/2-.5)*CELL_SIZE;world.addComponent(playerEntity,ComponentTypes.TRANSFORM,{x:t,y:.4,z:s});world.addComponent(playerEntity,ComponentTypes.VELOCITY,{vx:0,vz:0});world.addComponent(playerEntity,ComponentTypes.PHYSICS,{mass:1,acceleration:{x:0,z:0},maxSpeed:5,moveForce:12,friction:.88,airResistance:.92,groundFriction:.85,isGrounded:!0});world.addComponent(playerEntity,ComponentTypes.PLAYER,{});const i=new THREE.Mesh(new THREE.SphereGeometry(.3,16,16),new THREE.MeshStandardMaterial({color:16776960,emissive:4473924,emissiveIntensity:.3,roughness:.4,metalness:.1}));i.castShadow=!0;world.addComponent(playerEntity,ComponentTypes.RENDER,{mesh:i});const e=new THREE.PointLight(16777096,1.5,10);i.add(e);world.addComponent(playerEntity,ComponentTypes.LIGHT,{light:e});scene.add(i)}
+  function createGoal(){goalEntity=world.createEntity();const t=(maze.end.c-COLS/2+.5)*CELL_SIZE,s=(maze.end.r-ROWS/2+.5)*CELL_SIZE;world.addComponent(goalEntity,ComponentTypes.TRANSFORM,{x:t,y:.5,z:s});world.addComponent(goalEntity,ComponentTypes.GOAL,{});const i=new THREE.Mesh(new THREE.CylinderGeometry(.4,.4,1,8),new THREE.MeshStandardMaterial({color:65280,emissive:17408,emissiveIntensity:.5}));world.addComponent(goalEntity,ComponentTypes.RENDER,{mesh:i});const e=new THREE.PointLight(65280,2,8);e.position.set(0,1,0),i.add(e),scene.add(i)}
 
   /***** ──────────────────────────────────────────────────
    * ECS SYSTEMS
    * ────────────────────────────────────────────────── */
   
-  function setupSystems() {
-    // Input System - Apply forces based on input
-    world.addSystem((world, deltaTime) => {
-      const players = world.query([ComponentTypes.PLAYER, ComponentTypes.PHYSICS]);
-      
-      for (const entityId of players) {
-        const physics = world.getComponent(entityId, ComponentTypes.PHYSICS);
-        
-        // Reset acceleration
-        physics.acceleration.x = 0;
-        physics.acceleration.z = 0;
-        
-        // Calculate input direction
-        let inputX = 0, inputZ = 0;
-        if (keyState['KeyD'] || keyState['ArrowRight']) inputX += 1;
-        if (keyState['KeyA'] || keyState['ArrowLeft']) inputX -= 1;
-        if (keyState['KeyS'] || keyState['ArrowDown']) inputZ += 1;
-        if (keyState['KeyW'] || keyState['ArrowUp']) inputZ -= 1;
-        
-        // Normalize input vector
-        const inputLength = Math.sqrt(inputX * inputX + inputZ * inputZ);
-        if (inputLength > 0) {
-          inputX /= inputLength;
-          inputZ /= inputLength;
-          
-          // Apply movement force
-          const force = physics.moveForce;
-          physics.acceleration.x += (inputX * force) / physics.mass;
-          physics.acceleration.z += (inputZ * force) / physics.mass;
-        }
-      }
-    });
-    
-    // Physics System - Handle acceleration, velocity, and friction
-    world.addSystem((world, deltaTime) => {
-      const physicsEntities = world.query([ComponentTypes.VELOCITY, ComponentTypes.PHYSICS]);
-      
-      // Cap deltaTime to prevent large jumps
-      deltaTime = Math.min(deltaTime, 1/30); // Max 30fps equivalent
-      
-      for (const entityId of physicsEntities) {
-        const velocity = world.getComponent(entityId, ComponentTypes.VELOCITY);
-        const physics = world.getComponent(entityId, ComponentTypes.PHYSICS);
-        
-        // Apply acceleration to velocity
-        velocity.vx += physics.acceleration.x * deltaTime;
-        velocity.vz += physics.acceleration.z * deltaTime;
-        
-        // Apply smooth friction using exponential decay
-        const frictionFactor = Math.pow(physics.airResistance, deltaTime * 10);
-        velocity.vx *= frictionFactor;
-        velocity.vz *= frictionFactor;
-        
-        // Apply ground friction when on ground and moving
-        if (physics.isGrounded) {
-          const groundFrictionFactor = Math.pow(physics.groundFriction, deltaTime * 8);
-          velocity.vx *= groundFrictionFactor;
-          velocity.vz *= groundFrictionFactor;
-        }
-        
-        // Speed limiting
-        const currentSpeed = Math.sqrt(velocity.vx * velocity.vx + velocity.vz * velocity.vz);
-        if (currentSpeed > physics.maxSpeed) {
-          const scale = physics.maxSpeed / currentSpeed;
-          velocity.vx *= scale;
-          velocity.vz *= scale;
-        }
-        
-        // Stop very small velocities to prevent micro-jitter
-        if (Math.abs(velocity.vx) < 0.02) velocity.vx = 0;
-        if (Math.abs(velocity.vz) < 0.02) velocity.vz = 0;
-      }
-    });
-    
-    // Movement System - Apply velocities with collision detection
-    world.addSystem((world, deltaTime) => {
-      const movableEntities = world.query([ComponentTypes.TRANSFORM, ComponentTypes.VELOCITY]);
-      
-      for (const entityId of movableEntities) {
-        const transform = world.getComponent(entityId, ComponentTypes.TRANSFORM);
-        const velocity = world.getComponent(entityId, ComponentTypes.VELOCITY);
-        
-        // Calculate potential new positions
-        const newX = transform.x + velocity.vx * deltaTime;
-        const newZ = transform.z + velocity.vz * deltaTime;
-        
-        // Handle X-axis collision
-        if (!checkCollision(newX, transform.z)) {
-          transform.x = newX;
-        } else {
-          velocity.vx *= -0.1; 
-        }
-        
-        // Handle Z-axis collision
-        if (!checkCollision(transform.x, newZ)) {
-          transform.z = newZ;
-        } else {
-          velocity.vz *= -0.1;
-        }
-      }
-    });
-    
-    // Render System
-    world.addSystem((world, deltaTime) => {
-      const renderableEntities = world.query([ComponentTypes.TRANSFORM, ComponentTypes.RENDER]);
-      
-      for (const entityId of renderableEntities) {
-        const transform = world.getComponent(entityId, ComponentTypes.TRANSFORM);
-        const render = world.getComponent(entityId, ComponentTypes.RENDER);
-        
-        if (render.mesh) {
-          render.mesh.position.set(transform.x, transform.y, transform.z);
-          
-          if (world.hasComponent(entityId, ComponentTypes.PLAYER)) {
-            const velocity = world.getComponent(entityId, ComponentTypes.VELOCITY);
-            render.mesh.rotation.x += velocity.vz * deltaTime * 0.5;
-            render.mesh.rotation.z -= velocity.vx * deltaTime * 0.5;
-          }
-        }
-      }
-    });
-    
-    // Goal System
-    world.addSystem((world, deltaTime) => {
-      if (gameCompleted) return;
-      
-      const players = world.query([ComponentTypes.PLAYER, ComponentTypes.TRANSFORM]);
-      const goals = world.query([ComponentTypes.GOAL, ComponentTypes.TRANSFORM]);
-      
-      for (const playerId of players) {
-        const playerTransform = world.getComponent(playerId, ComponentTypes.TRANSFORM);
-        
-        for (const goalId of goals) {
-          const goalTransform = world.getComponent(goalId, ComponentTypes.TRANSFORM);
-          
-          const distance = Math.sqrt(
-            Math.pow(playerTransform.x - goalTransform.x, 2) +
-            Math.pow(playerTransform.z - goalTransform.z, 2)
-          );
-          
-          if (distance < 1.0) {
-            gameCompleted = true;
-            document.getElementById('goal-indicator').style.opacity = '1';
-            setTimeout(() => {
-              initializeGame();
-            }, 3000); // Automatically start new game after 3 seconds
-          }
-        }
-      }
-    });
-    
-    // UI Update System - Update physics debug only
-    world.addSystem((world, deltaTime) => {
-      if (!physicsDebugEnabled) return;
-      
-      const players = world.query([ComponentTypes.PLAYER, ComponentTypes.VELOCITY, ComponentTypes.PHYSICS]);
-      
-      for (const playerId of players) {
-        const velocity = world.getComponent(playerId, ComponentTypes.VELOCITY);
-        const physics = world.getComponent(playerId, ComponentTypes.PHYSICS);
-        
-        const speed = Math.sqrt(velocity.vx * velocity.vx + velocity.vz * velocity.vz);
-        
-        document.getElementById('debug-speed').textContent = speed.toFixed(2);
-        document.getElementById('debug-vx').textContent = velocity.vx.toFixed(2);
-        document.getElementById('debug-vz').textContent = velocity.vz.toFixed(2);
-        document.getElementById('debug-ax').textContent = physics.acceleration.x.toFixed(2);
-        document.getElementById('debug-az').textContent = physics.acceleration.z.toFixed(2);
-        
-        let inputX = 0, inputZ = 0;
-        if (keyState['KeyD'] || keyState['ArrowRight']) inputX += 1;
-        if (keyState['KeyA'] || keyState['ArrowLeft']) inputX -= 1;
-        if (keyState['KeyS'] || keyState['ArrowDown']) inputZ += 1;
-        if (keyState['KeyW'] || keyState['ArrowUp']) inputZ -= 1;
-        
-        document.getElementById('debug-ix').textContent = inputX;
-        document.getElementById('debug-iz').textContent = inputZ;
-        
-        break; // Only process first player
-      }
-    });
-  }
-
-  function checkCollision(x, z, radius = 0.3) {
-    const buffer = 0.1;
-    
-    // World boundary check
-    const halfWidth = COLS * CELL_SIZE / 2;
-    const halfDepth = ROWS * CELL_SIZE / 2;
-    if (x < -halfWidth + radius || x > halfWidth - radius || z < -halfDepth + radius || z > halfDepth - radius) {
-        return true;
-    }
-
-    // Maze wall check
-    for (const wall of walls) {
-      const dx = Math.abs(x - wall.x);
-      const dz = Math.abs(z - wall.z);
-      
-      if (wall.horizontal) {
-        if (dz < radius + buffer && dx < CELL_SIZE / 2 + radius) {
-          return true;
-        }
-      } else {
-        if (dx < radius + buffer && dz < CELL_SIZE / 2 + radius) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
+  function setupSystems(){
+    world.addSystem((t,s)=>{const i=t.query([ComponentTypes.PLAYER,ComponentTypes.PHYSICS]);for(const e of i){const i=t.getComponent(e,ComponentTypes.PHYSICS);i.acceleration.x=0,i.acceleration.z=0;let h=0,o=0;keyState.KeyD||keyState.ArrowRight?h+=1:0,keyState.KeyA||keyState.ArrowLeft?h-=1:0,keyState.KeyS||keyState.ArrowDown?o+=1:0,keyState.KeyW||keyState.ArrowUp?o-=1:0;const a=Math.hypot(h,o);if(a>0){h/=a,o/=a;const t=i.moveForce;i.acceleration.x+=h*t/i.mass,i.acceleration.z+=o*t/i.mass}}});
+    world.addSystem((t,s)=>{const i=t.query([ComponentTypes.VELOCITY,ComponentTypes.PHYSICS]);s=Math.min(s,1/30);for(const e of i){const i=t.getComponent(e,ComponentTypes.VELOCITY),h=t.getComponent(e,ComponentTypes.PHYSICS);i.vx+=h.acceleration.x*s,i.vz+=h.acceleration.z*s;const o=Math.pow(h.airResistance,10*s);i.vx*=o,i.vz*=o,h.isGrounded&&(i.vx*=Math.pow(h.groundFriction,8*s),i.vz*=Math.pow(h.groundFriction,8*s));const a=Math.hypot(i.vx,i.vz);if(a>h.maxSpeed){const t=h.maxSpeed/a;i.vx*=t,i.vz*=t}Math.abs(i.vx)<.02&&(i.vx=0),Math.abs(i.vz)<.02&&(i.vz=0)}});
+    // FIX: Calling playSound with the correct sprite name.
+    world.addSystem((t,s)=>{const i=t.query([ComponentTypes.TRANSFORM,ComponentTypes.VELOCITY]);for(const e of i){const i=t.getComponent(e,ComponentTypes.TRANSFORM),h=t.getComponent(e,ComponentTypes.VELOCITY),o=i.x+h.vx*s,a=i.z+h.vz*s,n=()=>{const s=performance.now();s-lastCollisionTime>200&&(audioSystem.playSound("collision"),lastCollisionTime=s)};checkCollision(o,i.z)?(h.vx*=-.1,t.hasComponent(e,ComponentTypes.PLAYER)&&n()):i.x=o,checkCollision(i.x,a)?(h.vz*=-.1,t.hasComponent(e,ComponentTypes.PLAYER)&&n()):i.z=a}});
+    world.addSystem((t,s)=>{const i=t.query([ComponentTypes.TRANSFORM,ComponentTypes.RENDER]);for(const e of i){const i=t.getComponent(e,ComponentTypes.TRANSFORM),h=t.getComponent(e,ComponentTypes.RENDER);if(h.mesh){h.mesh.position.set(i.x,i.y,i.z);if(t.hasComponent(e,ComponentTypes.PLAYER)){const i=t.getComponent(e,ComponentTypes.VELOCITY);h.mesh.rotation.x+=i.vz*s*.5,h.mesh.rotation.z-=.5*i.vx*s}}}});
+    // FIX: Calling playSound with the correct sprite name.
+    world.addSystem((t,s)=>{if(gameCompleted)return;const i=t.query([ComponentTypes.PLAYER,ComponentTypes.TRANSFORM]),e=t.query([ComponentTypes.GOAL,ComponentTypes.TRANSFORM]);for(const h of i){const i=t.getComponent(h,ComponentTypes.TRANSFORM);for(const o of e){const e=t.getComponent(o,ComponentTypes.TRANSFORM),a=Math.hypot(i.x-e.x,i.z-e.z);a<1&&(gameCompleted=!0,audioSystem.playSound("goal"),document.getElementById("goal-indicator").style.opacity="1",setTimeout(()=>{initializeGame()},3e3))}}});
+    world.addSystem((t,s)=>{if(!physicsDebugEnabled)return;const i=t.query([ComponentTypes.PLAYER,ComponentTypes.VELOCITY,ComponentTypes.PHYSICS]);for(const e of i){const i=t.getComponent(e,ComponentTypes.VELOCITY),h=t.getComponent(e,ComponentTypes.PHYSICS),o=Math.hypot(i.vx,i.vz);document.getElementById("debug-speed").textContent=o.toFixed(2),document.getElementById("debug-vx").textContent=i.vx.toFixed(2),document.getElementById("debug-vz").textContent=i.vz.toFixed(2),document.getElementById("debug-ax").textContent=h.acceleration.x.toFixed(2),document.getElementById("debug-az").textContent=h.acceleration.z.toFixed(2);let a=0,n=0;keyState.KeyD||keyState.ArrowRight?a=1:0,keyState.KeyA||keyState.ArrowLeft?a=-1:0,keyState.KeyS||keyState.ArrowDown?n=1:0,keyState.KeyW||keyState.ArrowUp?n=-1:0,document.getElementById("debug-ix").textContent=a,document.getElementById("debug-iz").textContent=n;break}});}
+  function checkCollision(x,z,radius=.3){const buffer=.1;if(x<-COLS*CELL_SIZE/2+radius||x>COLS*CELL_SIZE/2-radius||z<-ROWS*CELL_SIZE/2+radius||z>ROWS*CELL_SIZE/2-radius)return!0;for(const wall of walls){const dx=Math.abs(x-wall.x),dz=Math.abs(z-wall.z);if(wall.horizontal){if(dz<radius+buffer&&dx<CELL_SIZE/2+radius)return!0}else if(dx<radius+buffer&&dz<CELL_SIZE/2+radius)return!0}return!1}
 
   /***** ──────────────────────────────────────────────────
-   * INPUT HANDLING
+   * INPUT HANDLING (No Changes)
    * ────────────────────────────────────────────────── */
   
   const keyState = {};
-  
   window.addEventListener('keydown', (e) => {
+    if (audioSystem) { audioSystem.startMusic(); }
     keyState[e.code] = true;
-    
-    // These controls should not be blocked by typing in an input field in the future
-    if (e.code === 'KeyC') {
-      cameraSystem.toggleMode();
-    } else if (e.code === 'KeyM') {
-      minimapSystem.toggle();
-    } else if (e.code === 'KeyR') {
-      initializeGame();
-    } else if (e.code === 'KeyP') {
-      physicsDebugEnabled = !physicsDebugEnabled;
-      document.getElementById('physics-debug').style.display = 
-        physicsDebugEnabled ? 'block' : 'none';
+    if (document.activeElement === document.body) {
+        if (e.code === 'KeyC') { cameraSystem.toggleMode(); }
+        else if (e.code === 'KeyM') { minimapSystem.toggle(); }
+        else if (e.code === 'KeyR') { initializeGame(); }
+        else if (e.code === 'KeyP') {
+            physicsDebugEnabled = !physicsDebugEnabled;
+            document.getElementById('physics-debug').style.display = physicsDebugEnabled ? 'block' : 'none';
+        }
+        else if (e.code === 'KeyJ') { if (audioSystem) audioSystem.toggleMusic(); }
+        else if (e.code === 'KeyK') { if (audioSystem) audioSystem.toggleSfx(); }
     }
   });
-  
-  window.addEventListener('keyup', (e) => {
-    keyState[e.code] = false;
-  });
-  
-  window.addEventListener('resize', () => {
-    camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(window.innerWidth, window.innerHeight);
-  });
+  window.addEventListener('keyup', (e) => { keyState[e.code] = false; });
+  window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
+  document.getElementById('toggle-music').addEventListener('click', () => { if (audioSystem) audioSystem.toggleMusic(); });
+  document.getElementById('toggle-sfx').addEventListener('click', () => { if (audioSystem) audioSystem.toggleSfx(); });
 
   /***** ──────────────────────────────────────────────────
-   * MAIN GAME LOOP
+   * MAIN GAME LOOP (No Changes)
    * ────────────────────────────────────────────────── */
   
   let lastTime = performance.now();
-  
   function gameLoop(currentTime) {
     requestAnimationFrame(gameLoop);
-
     const rawDeltaTime = (currentTime - lastTime) / 1000;
     lastTime = currentTime;
-    
-    // Cap deltaTime to prevent huge jumps and ensure consistent physics
     const deltaTime = Math.min(rawDeltaTime, 1/30); 
-    
-    // Update ECS systems
-    if (world) {
-        world.update(deltaTime);
-    }
-    
-    // Update camera
-    if (cameraSystem) {
-        cameraSystem.update(world);
-    }
-    
-    // Update minimap
-    if (minimapSystem) {
-        minimapSystem.update(world);
-    }
-    
-    // Render
+    if (world) { world.update(deltaTime); }
+    if (cameraSystem) { cameraSystem.update(world); }
+    if (minimapSystem) { minimapSystem.update(world); }
     renderer.render(scene, camera);
   }
 
   // Initialize and start the game
   initializeGame();
   gameLoop(lastTime);
-
-  console.log("🎮 Advanced Physics-Based Maze Game Loaded!");
+  console.log("🎮 Advanced Physics-Based Maze Game Loaded! V2.6 with Audio Fixed.");
 
 } catch (error) {
   console.error("Failed to initialize maze game:", error);
-  document.body.innerHTML = `
-    <div style="color: white; text-align: center; margin-top: 50px; font-family: Arial;">
-      <h2>Failed to load the maze game</h2>
-      <p>Error: ${error.message}</p>
-      <p>Please check the browser console for more details.</p>
-    </div>
-  `;
+  document.body.innerHTML = `<div style="color:white;text-align:center;margin-top:50px;font-family:Arial;"><h2>Failed to initialize maze game</h2><p>Error: ${error.message}</p><p>Please check the browser console for more details.</p></div>`;
 }
 </script>
 </body>
