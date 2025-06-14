@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Advanced Procedural Maze · ECS · Audio</title>
+  <title>Advanced Procedural Maze · Wall Sliding</title>
   <style>
-    html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:Arial,sans-serif;}
+    html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:'Arial',sans-serif;}
     canvas{display:block}
     
     #ui {
@@ -16,19 +16,34 @@
       bottom: 0;
       pointer-events: none;
       z-index: 100;
+      color: #fff;
     }
     
     #controls {
       position: absolute;
       top: 10px;
       left: 10px;
-      color: #fff;
       background: rgba(0,0,0,0.8);
       padding: 15px;
       border-radius: 8px;
       pointer-events: auto;
       font-size: 14px;
       max-width: 250px;
+    }
+
+    #hud {
+        position: absolute;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        display: flex;
+        gap: 30px;
+        background: rgba(0,0,0,0.7);
+        padding: 10px 20px;
+        border-radius: 12px;
+        font-size: 22px;
+        font-weight: bold;
+        text-shadow: 1px 1px 2px #000;
     }
     
     #minimap-container {
@@ -50,7 +65,6 @@
       position: absolute;
       top: 10px;
       right: 10px;
-      color: #fff;
       background: rgba(0,0,0,0.8);
       padding: 10px;
       border-radius: 5px;
@@ -75,7 +89,6 @@
       position: absolute;
       bottom: 20px;
       left: 20px;
-      color: #fff;
       background: rgba(0,0,0,0.8);
       padding: 10px;
       border-radius: 5px;
@@ -101,6 +114,11 @@
 </head>
 <body>
 <div id="ui">
+  <div id="hud">
+    <div>Time: <span id="timer">00:00</span></div>
+    <div>Score: <span id="score">0</span></div>
+  </div>
+
   <div id="controls">
     <div><strong>🎮 Controls</strong></div>
     <div><span class="control-key">WASD</span> / <span class="control-key">Arrows</span> - Move</div>
@@ -115,7 +133,7 @@
 
     <div style="margin-top:10px;"><strong>🎯 Goal:</strong> Find the green exit!</div>
     <div style="margin-top:5px;font-size:11px;opacity:0.8;">
-      <em>Physics: Momentum, inertia & friction enabled!</em>
+      <em>Collect coins for more points!</em>
     </div>
   </div>
   
@@ -146,17 +164,75 @@ try {
    * ECS ARCHITECTURE
    * ────────────────────────────────────────────────── */
   
-  const ComponentTypes = { TRANSFORM: 'transform', VELOCITY: 'velocity', PHYSICS: 'physics', RENDER: 'render', PLAYER: 'player', CAMERA_TARGET: 'camera_target', GOAL: 'goal', LIGHT: 'light' };
+  const ComponentTypes = { 
+    TRANSFORM: 'transform', VELOCITY: 'velocity', PHYSICS: 'physics', RENDER: 'render', PLAYER: 'player', 
+    GOAL: 'goal', LIGHT: 'light', COLLECTIBLE: 'collectible'
+  };
+
   class ECSWorld {
-    constructor(){this.entities=new Map();this.components=new Map();this.systems=[];this.nextEntityId=1;Object.values(ComponentTypes).forEach(t=>{this.components.set(t,new Map())})}
-    createEntity(){const t=this.nextEntityId++;this.entities.set(t,new Set());return t}
-    addComponent(t,s,i={}){return!!this.entities.has(t)&&(this.entities.get(t).add(s),this.components.get(s).set(t,i),!0)}
-    getComponent(t,s){return this.components.get(s).get(t)}
-    hasComponent(t,s){return this.entities.has(t)&&this.entities.get(t).has(s)}
-    removeComponent(t,s){this.entities.has(t)&&(this.entities.get(t).delete(s),this.components.get(s).delete(t))}
-    query(t){const s=[];for(const[i,e]of this.entities)t.every(t=>e.has(t))&&s.push(i);return s}
-    addSystem(t){this.systems.push(t)}
-    update(t){this.systems.forEach(s=>s(this,t))}
+    constructor() {
+      this.entities = new Map();
+      this.components = new Map();
+      this.systems = [];
+      this.nextEntityId = 1;
+      
+      Object.values(ComponentTypes).forEach(type => {
+        this.components.set(type, new Map());
+      });
+    }
+    
+    createEntity() {
+      const id = this.nextEntityId++;
+      this.entities.set(id, new Set());
+      return id;
+    }
+    
+    addComponent(entityId, componentType, data = {}) {
+      if (!this.entities.has(entityId)) return false;
+      this.entities.get(entityId).add(componentType);
+      this.components.get(componentType).set(entityId, data);
+      return true;
+    }
+    
+    getComponent(entityId, componentType) {
+      return this.components.get(componentType).get(entityId);
+    }
+    
+    hasComponent(entityId, componentType) {
+      return this.entities.has(entityId) && this.entities.get(entityId).has(componentType);
+    }
+    
+    removeComponent(entityId, componentType) {
+        if (!this.hasComponent(entityId, componentType)) return;
+        this.entities.get(entityId).delete(componentType);
+        this.components.get(componentType).delete(entityId);
+    }
+
+    removeEntity(entityId) {
+        if (!this.entities.has(entityId)) return;
+        this.entities.get(entityId).forEach(componentType => {
+            this.removeComponent(entityId, componentType);
+        });
+        this.entities.delete(entityId);
+    }
+    
+    query(componentTypes) {
+      const results = [];
+      for (const [entityId, entityComponents] of this.entities) {
+        if (componentTypes.every(type => entityComponents.has(type))) {
+          results.push(entityId);
+        }
+      }
+      return results;
+    }
+    
+    addSystem(systemFunction) {
+      this.systems.push(systemFunction);
+    }
+    
+    update(deltaTime) {
+      this.systems.forEach(system => system(this, deltaTime));
+    }
   }
 
   /***** ──────────────────────────────────────────────────
@@ -169,24 +245,31 @@ try {
     let current = {r: 0, c: 0};
     grid[0][0].visited = true;
     const directions = [[-1, 0, 0, 2], [0, 1, 1, 3], [1, 0, 2, 0], [0, -1, 3, 1]];
+    
     do {
       const {r, c} = current;
       const neighbors = directions.filter(([dr, dc]) => {
-        const nr = r + dr; const nc = c + dc;
+        const nr = r + dr;
+        const nc = c + dc;
         return nr >= 0 && nr < rows && nc >= 0 && nc < cols && !grid[nr][nc].visited;
       });
+      
       if (neighbors.length > 0) {
         const [dr, dc, wallIdx, oppositeIdx] = neighbors[Math.floor(Math.random() * neighbors.length)];
-        const nr = r + dr; const nc = c + dc;
-        grid[r][c].walls[wallIdx] = false;
+        const nr = current.r + dr;
+        const nc = current.c + dc;
+        
+        grid[current.r][current.c].walls[wallIdx] = false;
         grid[nr][nc].visited = true;
         grid[nr][nc].walls[oppositeIdx] = false;
+        
         stack.push(current);
         current = {r: nr, c: nc};
       } else {
         current = stack.pop();
       }
     } while (stack.length > 0);
+    
     return { grid, start: {r: 0, c: 0}, end: {r: rows - 1, c: cols - 1} };
   }
 
@@ -194,57 +277,137 @@ try {
    * CAMERA & MINIMAP SYSTEMS
    * ────────────────────────────────────────────────── */
   
-  const CameraMode={THIRD_PERSON:"third_person",FIRST_PERSON:"first_person"};class CameraSystem{constructor(t){this.camera=t,this.mode=CameraMode.THIRD_PERSON,this.targetEntity=null,this.offset=new THREE.Vector3(0,4,6),this.firstPersonOffset=new THREE.Vector3(0,.5,0),this.smoothness=.1}setTarget(t){this.targetEntity=t}toggleMode(){this.mode=this.mode===CameraMode.THIRD_PERSON?CameraMode.FIRST_PERSON:CameraMode.THIRD_PERSON,document.getElementById("camera-info").textContent=this.mode===CameraMode.THIRD_PERSON?"Third Person":"First Person"}update(t){if(!this.targetEntity)return;const s=t.getComponent(this.targetEntity,ComponentTypes.TRANSFORM);if(!s)return;const i=new THREE.Vector3(s.x,s.y,s.z);if(this.mode===CameraMode.THIRD_PERSON){const t=i.clone().add(this.offset);this.camera.position.lerp(t,this.smoothness),this.camera.lookAt(i)}else{const e=i.clone().add(this.firstPersonOffset);this.camera.position.lerp(e,2*this.smoothness);const h=t.getComponent(this.targetEntity,ComponentTypes.VELOCITY);h&&Math.abs(h.vx)>.1||Math.abs(h.vz)>.1?this.camera.lookAt(i.clone().add(new THREE.Vector3(h.vx,0,h.vz).normalize())):this.camera.lookAt(i.x,i.y,i.z-1)}}}
-  class MinimapSystem{constructor(t,s,i,e){this.canvas=document.getElementById(t),this.ctx=this.canvas.getContext("2d"),this.maze=s,this.cols=i,this.rows=e,this.cellSize=this.canvas.width/Math.max(i,e),this.exploredCells=new Set,this.visible=!0,this.playerEntity=null,this.goalPos=null}setPlayer(t){this.playerEntity=t}setGoal(t){this.goalPos=t}toggle(){this.visible=!this.visible,document.getElementById("minimap-container").style.display=this.visible?"block":"none"}markExplored(t,s,i=1){for(let e=Math.max(0,t-i);e<=Math.min(this.rows-1,t+i);e++)for(let h=Math.max(0,s-i);h<=Math.min(this.cols-1,s+i);h++)this.exploredCells.add(`${e},${h}`)}update(t){if(!this.visible||!this.playerEntity)return;const s=t.getComponent(this.playerEntity,ComponentTypes.TRANSFORM);s&&(this.markExplored(Math.floor((s.z+this.rows*CELL_SIZE/2)/CELL_SIZE),Math.floor((s.x+this.cols*CELL_SIZE/2)/CELL_SIZE),1),this.render(Math.floor((s.z+this.rows*CELL_SIZE/2)/CELL_SIZE),Math.floor((s.x+this.cols*CELL_SIZE/2)/CELL_SIZE)))}render(t,s){this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height);for(let i=0;i<this.rows;i++)for(let e=0;e<this.cols;e++){const h=e*this.cellSize,o=i*this.cellSize;if(this.exploredCells.has(`${i},${e}`)){this.ctx.fillStyle="#333",this.ctx.fillRect(h,o,this.cellSize,this.cellSize),this.ctx.strokeStyle="#666",this.ctx.lineWidth=2,this.ctx.beginPath();const t=this.maze.grid[i][e];t.walls[0]&&(this.ctx.moveTo(h,o),this.ctx.lineTo(h+this.cellSize,o)),t.walls[1]&&(this.ctx.moveTo(h+this.cellSize,o),this.ctx.lineTo(h+this.cellSize,o+this.cellSize)),t.walls[2]&&(this.ctx.moveTo(h+this.cellSize,o+this.cellSize),this.ctx.lineTo(h,o+this.cellSize)),t.walls[3]&&(this.ctx.moveTo(h,o+this.cellSize),this.ctx.lineTo(h,o)),this.ctx.stroke()}else this.ctx.fillStyle="#111",this.ctx.fillRect(h,o,this.cellSize,this.cellSize)}if(this.goalPos&&this.exploredCells.has(`${this.goalPos.r},${this.goalPos.c}`)){const t=this.goalPos.c*this.cellSize+this.cellSize/2,s=this.goalPos.r*this.cellSize+this.cellSize/2;this.ctx.fillStyle="#00ff00",this.ctx.beginPath(),this.ctx.arc(t,s,this.cellSize/3,0,2*Math.PI),this.ctx.fill()}if(t>=0&&t<this.rows&&s>=0&&s<this.cols){const i=s*this.cellSize+this.cellSize/2,e=t*this.cellSize+this.cellSize/2;this.ctx.fillStyle="#ffff00",this.ctx.beginPath(),this.ctx.arc(i,e,this.cellSize/4,0,2*Math.PI),this.ctx.fill()}}}
+  const CameraMode = {THIRD_PERSON:"third_person",FIRST_PERSON:"first_person"};
+  class CameraSystem {
+    constructor(camera){
+        this.camera=camera;
+        this.mode=CameraMode.THIRD_PERSON;
+        this.targetEntity=null;
+        this.offset=new THREE.Vector3(0,4,6);
+        this.firstPersonOffset=new THREE.Vector3(0,.5,0);
+        this.smoothness=.1
+    }
+    setTarget(e){this.targetEntity=e}
+    toggleMode(){this.mode=this.mode===CameraMode.THIRD_PERSON?CameraMode.FIRST_PERSON:CameraMode.THIRD_PERSON;document.getElementById("camera-info").textContent=this.mode===CameraMode.THIRD_PERSON?"Third Person":"First Person"}
+    update(e){
+        if(!this.targetEntity)return;
+        const t=e.getComponent(this.targetEntity,ComponentTypes.TRANSFORM);
+        if(!t)return;
+        const s=new THREE.Vector3(t.x,t.y,t.z);
+        if(this.mode===CameraMode.THIRD_PERSON){
+            const e=s.clone().add(this.offset);
+            this.camera.position.lerp(e,this.smoothness);
+            this.camera.lookAt(s)
+        } else {
+            const i=s.clone().add(this.firstPersonOffset);
+            this.camera.position.lerp(i,2*this.smoothness);
+            const r=e.getComponent(this.targetEntity,ComponentTypes.VELOCITY);
+            if(r&&(Math.abs(r.vx)>.1||Math.abs(r.vz)>.1)){
+                this.camera.lookAt(s.clone().add(new THREE.Vector3(r.vx,0,r.vz).normalize()))
+            } else {
+                this.camera.lookAt(s.x,s.y,s.z-1)
+            }
+        }
+    }
+  }
+  
+  class MinimapSystem {
+    constructor(canvasId,maze,cols,rows){
+        this.canvas=document.getElementById(canvasId);
+        this.ctx=this.canvas.getContext("2d");
+        this.maze=maze;
+        this.cols=cols;
+        this.rows=rows;
+        this.cellSize=this.canvas.width/Math.max(cols,rows);
+        this.exploredCells=new Set;
+        this.visible=!0;
+        this.playerEntity=null;
+        this.goalPos=null
+    }
+    setPlayer(e){this.playerEntity=e}
+    setGoal(e){this.goalPos=e}
+    toggle(){this.visible=!this.visible;document.getElementById("minimap-container").style.display=this.visible?"block":"none"}
+    markExplored(e,t,s=1){for(let i=Math.max(0,e-s);i<=Math.min(this.rows-1,e+s);i++)for(let r=Math.max(0,t-s);r<=Math.min(this.cols-1,t+s);r++)this.exploredCells.add(`${i},${r}`)}
+    update(e){
+        if(!this.visible||!this.playerEntity)return;
+        const t=e.getComponent(this.playerEntity,ComponentTypes.TRANSFORM);
+        if(t){
+            this.markExplored(Math.floor((t.z+this.rows*CELL_SIZE/2)/CELL_SIZE),Math.floor((t.x+this.cols*CELL_SIZE/2)/CELL_SIZE),1);
+            this.render(Math.floor((t.z+this.rows*CELL_SIZE/2)/CELL_SIZE),Math.floor((t.x+this.cols*CELL_SIZE/2)/CELL_SIZE))
+        }
+    }
+    render(e,t){
+        this.ctx.clearRect(0,0,this.canvas.width,this.canvas.height);
+        for(let s=0;s<this.rows;s++){
+            for(let i=0;i<this.cols;i++){
+                const r=i*this.cellSize,o=s*this.cellSize;
+                if(this.exploredCells.has(`${s},${i}`)){
+                    this.ctx.fillStyle="#333";
+                    this.ctx.fillRect(r,o,this.cellSize,this.cellSize);
+                    this.ctx.strokeStyle="#666";
+                    this.ctx.lineWidth=2;
+                    this.ctx.beginPath();
+                    const e=this.maze.grid[s][i];
+                    if(e.walls[0]){this.ctx.moveTo(r,o);this.ctx.lineTo(r+this.cellSize,o)}
+                    if(e.walls[1]){this.ctx.moveTo(r+this.cellSize,o);this.ctx.lineTo(r+this.cellSize,o+this.cellSize)}
+                    if(e.walls[2]){this.ctx.moveTo(r+this.cellSize,o+this.cellSize);this.ctx.lineTo(r,o+this.cellSize)}
+                    if(e.walls[3]){this.ctx.moveTo(r,o+this.cellSize);this.ctx.lineTo(r,o)}
+                    this.ctx.stroke()
+                } else {
+                    this.ctx.fillStyle="#111";
+                    this.ctx.fillRect(r,o,this.cellSize,this.cellSize)
+                }
+            }
+        }
+        if(this.goalPos&&this.exploredCells.has(`${this.goalPos.r},${this.goalPos.c}`)){
+            const e=this.goalPos.c*this.cellSize+this.cellSize/2,t=this.goalPos.r*this.cellSize+this.cellSize/2;
+            this.ctx.fillStyle="#00ff00";
+            this.ctx.beginPath();
+            this.ctx.arc(e,t,this.cellSize/3,0,2*Math.PI);
+            this.ctx.fill()
+        }
+        if(e>=0&&e<this.rows&&t>=0&&t<this.cols){
+            const s=t*this.cellSize+this.cellSize/2,i=e*this.cellSize+this.cellSize/2;
+            this.ctx.fillStyle="#ffff00";
+            this.ctx.beginPath();
+            this.ctx.arc(s,i,this.cellSize/4,0,2*Math.PI);
+            this.ctx.fill()
+        }
+    }
+  }
 
   /***** ──────────────────────────────────────────────────
    * AUDIO SYSTEM
    * ────────────────────────────────────────────────── */
 
   class AudioSystem {
-    constructor() {
-      this.isMusicMuted = false;
-      this.isSfxMuted = false;
-      
-      // FIX: Reverting to reliable URLs from the official Howler.js CDN and using audio sprites.
-      this.sounds = {
-        'music': new Howl({
-          src: ['https://goldfirestudios.com/proj/howlerjs/sound.mp3'],
-          loop: true, volume: 0.3
-        }),
-        'sfx': new Howl({
-            src: ['https://goldfirestudios.com/proj/howlerjs/sounds.mp3'],
-            sprite: {
-                collision: [893, 764],
-                goal: [2049, 1152]
-            }
-        })
-      };
-      this.musicStarted = false;
+    constructor(){
+        this.isMusicMuted=false;
+        this.isSfxMuted=false;
+        this.sounds={
+            music:new Howl({src:["https://goldfirestudios.com/proj/howlerjs/sound.mp3"],loop:true,volume:.3}),
+            sfx:new Howl({src:["https://goldfirestudios.com/proj/howlerjs/sounds.mp3"],
+            sprite:{collision:[893,764],goal:[2049,1152],collect:[3500,450]}})
+        };
+        this.musicStarted=false
     }
-
-    startMusic() {
-      if (!this.musicStarted && !this.isMusicMuted) {
-        this.sounds.music.play();
-        this.musicStarted = true;
-      }
+    startMusic(){
+        if(!this.musicStarted&&!this.isMusicMuted){
+            this.sounds.music.play();
+            this.musicStarted=true
+        }
     }
-
-    playSound(spriteName) {
-      if (!this.isSfxMuted) {
-        this.sounds.sfx.play(spriteName);
-      }
+    playSound(e){
+        if(!this.isSfxMuted){this.sounds.sfx.play(e)}
     }
-    
-    toggleMusic() {
-        this.isMusicMuted = !this.isMusicMuted;
+    toggleMusic(){
+        this.isMusicMuted=!this.isMusicMuted;
         this.sounds.music.mute(this.isMusicMuted);
-        document.getElementById('toggle-music').classList.toggle('muted', this.isMusicMuted);
+        document.getElementById("toggle-music").classList.toggle("muted",this.isMusicMuted)
     }
-    
-    toggleSfx() {
-        this.isSfxMuted = !this.isSfxMuted;
-        document.getElementById('toggle-sfx').classList.toggle('muted', this.isSfxMuted);
+    toggleSfx(){
+        this.isSfxMuted=!this.isSfxMuted;
+        document.getElementById("toggle-sfx").classList.toggle("muted",this.isSfxMuted)
     }
   }
 
@@ -275,6 +438,9 @@ try {
   let gameCompleted = false;
   let physicsDebugEnabled = false;
   let lastCollisionTime = 0;
+  let score = 0;
+  let gameTime = 0;
+  let levelStartTime = 0;
 
   function initializeGame() {
     world = new ECSWorld();
@@ -288,34 +454,311 @@ try {
     buildMazeGeometry();
     createPlayer();
     createGoal();
+    createCollectibles(10);
+    
     cameraSystem.setTarget(playerEntity);
     minimapSystem.setPlayer(playerEntity);
     if (world.systems.length === 0) { setupSystems(); }
+    
     gameCompleted = false;
+    score = 0;
+    levelStartTime = performance.now();
     document.getElementById('goal-indicator').style.opacity = '0';
+    document.getElementById('score').textContent = score;
   }
 
-  function buildMazeGeometry(){walls=[];const t=textureLoader.load("https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/hardwood2_diffuse.jpg");t.wrapS=THREE.RepeatWrapping;t.wrapT=THREE.RepeatWrapping;t.repeat.set(COLS,ROWS);const s=textureLoader.load("https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/brick_diffuse.jpg");s.wrapS=THREE.RepeatWrapping;s.wrapT=THREE.RepeatWrapping;s.repeat.set(1,.5);const i=new THREE.MeshStandardMaterial({map:t,roughness:.8,metalness:.1}),e=new THREE.MeshStandardMaterial({map:s,roughness:.9,metalness:0}),h=new THREE.Mesh(new THREE.PlaneGeometry(COLS*CELL_SIZE,ROWS*CELL_SIZE),i);h.rotation.x=-Math.PI/2;h.receiveShadow=!0;scene.add(h);const o=new THREE.BoxGeometry(CELL_SIZE,1.5,.2);for(let t=0;t<ROWS;t++)for(let s=0;s<COLS;s++){const i=maze.grid[t][s],h=(s-COLS/2+.5)*CELL_SIZE,a=(t-ROWS/2+.5)*CELL_SIZE;if(i.walls[0]){const t=new THREE.Mesh(o,e.clone());t.position.set(h,.75,a-CELL_SIZE/2),t.castShadow=!0,scene.add(t),walls.push({x:h,z:a-CELL_SIZE/2,horizontal:!0})}if(i.walls[3]){const t=new THREE.Mesh(o,e.clone());t.rotation.y=Math.PI/2,t.position.set(h-CELL_SIZE/2,.75,a),t.castShadow=!0,scene.add(t),walls.push({x:h-CELL_SIZE/2,z:a,horizontal:!1})}if(t===ROWS-1&&i.walls[2]){const t=new THREE.Mesh(o,e.clone());t.position.set(h,.75,a+CELL_SIZE/2),t.castShadow=!0,scene.add(t),walls.push({x:h,z:a+CELL_SIZE/2,horizontal:!0})}if(s===COLS-1&&i.walls[1]){const t=new THREE.Mesh(o,e.clone());t.rotation.y=Math.PI/2,t.position.set(h+CELL_SIZE/2,.75,a),t.castShadow=!0,scene.add(t),walls.push({x:h+CELL_SIZE/2,z:a,horizontal:!1})}}}
-  function createPlayer(){playerEntity=world.createEntity();const t=-(COLS/2-.5)*CELL_SIZE,s=-(ROWS/2-.5)*CELL_SIZE;world.addComponent(playerEntity,ComponentTypes.TRANSFORM,{x:t,y:.4,z:s});world.addComponent(playerEntity,ComponentTypes.VELOCITY,{vx:0,vz:0});world.addComponent(playerEntity,ComponentTypes.PHYSICS,{mass:1,acceleration:{x:0,z:0},maxSpeed:5,moveForce:12,friction:.88,airResistance:.92,groundFriction:.85,isGrounded:!0});world.addComponent(playerEntity,ComponentTypes.PLAYER,{});const i=new THREE.Mesh(new THREE.SphereGeometry(.3,16,16),new THREE.MeshStandardMaterial({color:16776960,emissive:4473924,emissiveIntensity:.3,roughness:.4,metalness:.1}));i.castShadow=!0;world.addComponent(playerEntity,ComponentTypes.RENDER,{mesh:i});const e=new THREE.PointLight(16777096,1.5,10);i.add(e);world.addComponent(playerEntity,ComponentTypes.LIGHT,{light:e});scene.add(i)}
-  function createGoal(){goalEntity=world.createEntity();const t=(maze.end.c-COLS/2+.5)*CELL_SIZE,s=(maze.end.r-ROWS/2+.5)*CELL_SIZE;world.addComponent(goalEntity,ComponentTypes.TRANSFORM,{x:t,y:.5,z:s});world.addComponent(goalEntity,ComponentTypes.GOAL,{});const i=new THREE.Mesh(new THREE.CylinderGeometry(.4,.4,1,8),new THREE.MeshStandardMaterial({color:65280,emissive:17408,emissiveIntensity:.5}));world.addComponent(goalEntity,ComponentTypes.RENDER,{mesh:i});const e=new THREE.PointLight(65280,2,8);e.position.set(0,1,0),i.add(e),scene.add(i)}
+  function buildMazeGeometry() {
+    walls = [];
+    const floorTexture = textureLoader.load("https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/hardwood2_diffuse.jpg");
+    floorTexture.wrapS = THREE.RepeatWrapping;
+    floorTexture.wrapT = THREE.RepeatWrapping;
+    floorTexture.repeat.set(COLS, ROWS);
+    const wallTexture = textureLoader.load("https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/brick_diffuse.jpg");
+    wallTexture.wrapS = THREE.RepeatWrapping;
+    wallTexture.wrapT = THREE.RepeatWrapping;
+    wallTexture.repeat.set(1, 0.5);
+    const floorMaterial = new THREE.MeshStandardMaterial({ map: floorTexture, roughness: 0.8, metalness: 0.1 });
+    const wallMaterial = new THREE.MeshStandardMaterial({ map: wallTexture, roughness: 0.9, metalness: 0.0 });
+    const floor = new THREE.Mesh(new THREE.PlaneGeometry(COLS * CELL_SIZE, ROWS * CELL_SIZE), floorMaterial);
+    floor.rotation.x = -Math.PI / 2;
+    floor.receiveShadow = true;
+    scene.add(floor);
+    const wallGeometry = new THREE.BoxGeometry(CELL_SIZE, 1.5, 0.2);
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const cell = maze.grid[r][c];
+        const x = (c - COLS / 2 + 0.5) * CELL_SIZE;
+        const z = (r - ROWS / 2 + 0.5) * CELL_SIZE;
+        if (cell.walls[0]) {
+          const wall = new THREE.Mesh(wallGeometry, wallMaterial.clone());
+          wall.position.set(x, 0.75, z - CELL_SIZE / 2);
+          wall.castShadow = true;
+          scene.add(wall);
+          walls.push({ x: x, z: z - CELL_SIZE / 2, horizontal: true });
+        }
+        if (cell.walls[3]) {
+          const wall = new THREE.Mesh(wallGeometry, wallMaterial.clone());
+          wall.rotation.y = Math.PI / 2;
+          wall.position.set(x - CELL_SIZE / 2, 0.75, z);
+          wall.castShadow = true;
+          scene.add(wall);
+          walls.push({ x: x - CELL_SIZE / 2, z: z, horizontal: false });
+        }
+        if (r === ROWS - 1 && cell.walls[2]) {
+          const wall = new THREE.Mesh(wallGeometry, wallMaterial.clone());
+          wall.position.set(x, 0.75, z + CELL_SIZE / 2);
+          wall.castShadow = true;
+          scene.add(wall);
+          walls.push({ x: x, z: z + CELL_SIZE / 2, horizontal: true });
+        }
+        if (c === COLS - 1 && cell.walls[1]) {
+          const wall = new THREE.Mesh(wallGeometry, wallMaterial.clone());
+          wall.rotation.y = Math.PI / 2;
+          wall.position.set(x + CELL_SIZE / 2, 0.75, z);
+          wall.castShadow = true;
+          scene.add(wall);
+          walls.push({ x: x + CELL_SIZE / 2, z: z, horizontal: false });
+        }
+      }
+    }
+  }
 
+  function createPlayer() {
+    playerEntity = world.createEntity();
+    const startX = -(COLS / 2 - 0.5) * CELL_SIZE;
+    const startZ = -(ROWS / 2 - 0.5) * CELL_SIZE;
+    world.addComponent(playerEntity, ComponentTypes.TRANSFORM, { x: startX, y: 0.4, z: startZ });
+    world.addComponent(playerEntity, ComponentTypes.VELOCITY, { vx: 0, vz: 0 });
+    world.addComponent(playerEntity, ComponentTypes.PHYSICS, { mass: 1, acceleration: { x: 0, z: 0 }, maxSpeed: 5, moveForce: 12, friction: 0.88, airResistance: 0.92, groundFriction: 0.85, isGrounded: true });
+    world.addComponent(playerEntity, ComponentTypes.PLAYER, {});
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0x444400, emissiveIntensity: 0.3, roughness: 0.4, metalness: 0.1 }));
+    mesh.castShadow = true;
+    world.addComponent(playerEntity, ComponentTypes.RENDER, { mesh: mesh });
+    const light = new THREE.PointLight(0xffff88, 1.5, 10);
+    mesh.add(light);
+    world.addComponent(playerEntity, ComponentTypes.LIGHT, { light: light });
+    scene.add(mesh);
+  }
+
+  function createGoal() {
+    goalEntity = world.createEntity();
+    const goalX = (maze.end.c - COLS / 2 + 0.5) * CELL_SIZE;
+    const goalZ = (maze.end.r - ROWS / 2 + 0.5) * CELL_SIZE;
+    world.addComponent(goalEntity, ComponentTypes.TRANSFORM, { x: goalX, y: 0.5, z: goalZ });
+    world.addComponent(goalEntity, ComponentTypes.GOAL, {});
+    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1, 8), new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x004400, emissiveIntensity: 0.5 }));
+    world.addComponent(goalEntity, ComponentTypes.RENDER, { mesh: mesh });
+    const light = new THREE.PointLight(0x00ff00, 2, 8);
+    light.position.set(0, 1, 0);
+    mesh.add(light);
+    scene.add(mesh);
+  }
+
+  function createCollectibles(count) {
+    const geometry = new THREE.SphereGeometry(0.15, 8, 8);
+    const material = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xccab00, metalness: 0.6, roughness: 0.2 });
+    for (let i = 0; i < count; i++) {
+      const collectibleId = world.createEntity();
+      let r, c;
+      do {
+        r = Math.floor(Math.random() * ROWS);
+        c = Math.floor(Math.random() * COLS);
+      } while ((r === 0 && c === 0) || (r === ROWS - 1 && c === COLS - 1));
+      const x = (c - COLS / 2 + 0.5) * CELL_SIZE;
+      const z = (r - ROWS / 2 + 0.5) * CELL_SIZE;
+      world.addComponent(collectibleId, ComponentTypes.TRANSFORM, { x: x, y: 0.4, z: z });
+      const mesh = new THREE.Mesh(geometry, material);
+      world.addComponent(collectibleId, ComponentTypes.RENDER, { mesh: mesh });
+      world.addComponent(collectibleId, ComponentTypes.COLLECTIBLE, { value: 100 });
+      scene.add(mesh);
+    }
+  }
   /***** ──────────────────────────────────────────────────
    * ECS SYSTEMS
    * ────────────────────────────────────────────────── */
   
-  function setupSystems(){
-    world.addSystem((t,s)=>{const i=t.query([ComponentTypes.PLAYER,ComponentTypes.PHYSICS]);for(const e of i){const i=t.getComponent(e,ComponentTypes.PHYSICS);i.acceleration.x=0,i.acceleration.z=0;let h=0,o=0;keyState.KeyD||keyState.ArrowRight?h+=1:0,keyState.KeyA||keyState.ArrowLeft?h-=1:0,keyState.KeyS||keyState.ArrowDown?o+=1:0,keyState.KeyW||keyState.ArrowUp?o-=1:0;const a=Math.hypot(h,o);if(a>0){h/=a,o/=a;const t=i.moveForce;i.acceleration.x+=h*t/i.mass,i.acceleration.z+=o*t/i.mass}}});
-    world.addSystem((t,s)=>{const i=t.query([ComponentTypes.VELOCITY,ComponentTypes.PHYSICS]);s=Math.min(s,1/30);for(const e of i){const i=t.getComponent(e,ComponentTypes.VELOCITY),h=t.getComponent(e,ComponentTypes.PHYSICS);i.vx+=h.acceleration.x*s,i.vz+=h.acceleration.z*s;const o=Math.pow(h.airResistance,10*s);i.vx*=o,i.vz*=o,h.isGrounded&&(i.vx*=Math.pow(h.groundFriction,8*s),i.vz*=Math.pow(h.groundFriction,8*s));const a=Math.hypot(i.vx,i.vz);if(a>h.maxSpeed){const t=h.maxSpeed/a;i.vx*=t,i.vz*=t}Math.abs(i.vx)<.02&&(i.vx=0),Math.abs(i.vz)<.02&&(i.vz=0)}});
-    // FIX: Calling playSound with the correct sprite name.
-    world.addSystem((t,s)=>{const i=t.query([ComponentTypes.TRANSFORM,ComponentTypes.VELOCITY]);for(const e of i){const i=t.getComponent(e,ComponentTypes.TRANSFORM),h=t.getComponent(e,ComponentTypes.VELOCITY),o=i.x+h.vx*s,a=i.z+h.vz*s,n=()=>{const s=performance.now();s-lastCollisionTime>200&&(audioSystem.playSound("collision"),lastCollisionTime=s)};checkCollision(o,i.z)?(h.vx*=-.1,t.hasComponent(e,ComponentTypes.PLAYER)&&n()):i.x=o,checkCollision(i.x,a)?(h.vz*=-.1,t.hasComponent(e,ComponentTypes.PLAYER)&&n()):i.z=a}});
-    world.addSystem((t,s)=>{const i=t.query([ComponentTypes.TRANSFORM,ComponentTypes.RENDER]);for(const e of i){const i=t.getComponent(e,ComponentTypes.TRANSFORM),h=t.getComponent(e,ComponentTypes.RENDER);if(h.mesh){h.mesh.position.set(i.x,i.y,i.z);if(t.hasComponent(e,ComponentTypes.PLAYER)){const i=t.getComponent(e,ComponentTypes.VELOCITY);h.mesh.rotation.x+=i.vz*s*.5,h.mesh.rotation.z-=.5*i.vx*s}}}});
-    // FIX: Calling playSound with the correct sprite name.
-    world.addSystem((t,s)=>{if(gameCompleted)return;const i=t.query([ComponentTypes.PLAYER,ComponentTypes.TRANSFORM]),e=t.query([ComponentTypes.GOAL,ComponentTypes.TRANSFORM]);for(const h of i){const i=t.getComponent(h,ComponentTypes.TRANSFORM);for(const o of e){const e=t.getComponent(o,ComponentTypes.TRANSFORM),a=Math.hypot(i.x-e.x,i.z-e.z);a<1&&(gameCompleted=!0,audioSystem.playSound("goal"),document.getElementById("goal-indicator").style.opacity="1",setTimeout(()=>{initializeGame()},3e3))}}});
-    world.addSystem((t,s)=>{if(!physicsDebugEnabled)return;const i=t.query([ComponentTypes.PLAYER,ComponentTypes.VELOCITY,ComponentTypes.PHYSICS]);for(const e of i){const i=t.getComponent(e,ComponentTypes.VELOCITY),h=t.getComponent(e,ComponentTypes.PHYSICS),o=Math.hypot(i.vx,i.vz);document.getElementById("debug-speed").textContent=o.toFixed(2),document.getElementById("debug-vx").textContent=i.vx.toFixed(2),document.getElementById("debug-vz").textContent=i.vz.toFixed(2),document.getElementById("debug-ax").textContent=h.acceleration.x.toFixed(2),document.getElementById("debug-az").textContent=h.acceleration.z.toFixed(2);let a=0,n=0;keyState.KeyD||keyState.ArrowRight?a=1:0,keyState.KeyA||keyState.ArrowLeft?a=-1:0,keyState.KeyS||keyState.ArrowDown?n=1:0,keyState.KeyW||keyState.ArrowUp?n=-1:0,document.getElementById("debug-ix").textContent=a,document.getElementById("debug-iz").textContent=n;break}});}
+  function setupSystems() {
+    world.addSystem((world, deltaTime) => {
+      const players = world.query([ComponentTypes.PLAYER, ComponentTypes.PHYSICS]);
+      for (const entityId of players) {
+        const physics = world.getComponent(entityId, ComponentTypes.PHYSICS);
+        physics.acceleration.x = 0;
+        physics.acceleration.z = 0;
+        let inputX = 0, inputZ = 0;
+        if (keyState['KeyD'] || keyState['ArrowRight']) inputX += 1;
+        if (keyState['KeyA'] || keyState['ArrowLeft']) inputX -= 1;
+        if (keyState['KeyS'] || keyState['ArrowDown']) inputZ += 1;
+        if (keyState['KeyW'] || keyState['ArrowUp']) inputZ -= 1;
+        const inputLength = Math.hypot(inputX, inputZ);
+        if (inputLength > 0) {
+          inputX /= inputLength;
+          inputZ /= inputLength;
+          const force = physics.moveForce;
+          physics.acceleration.x += (inputX * force) / physics.mass;
+          physics.acceleration.z += (inputZ * force) / physics.mass;
+        }
+      }
+    });
+
+    world.addSystem((world, deltaTime) => {
+      const physicsEntities = world.query([ComponentTypes.VELOCITY, ComponentTypes.PHYSICS]);
+      deltaTime = Math.min(deltaTime, 1 / 30);
+      for (const entityId of physicsEntities) {
+        const velocity = world.getComponent(entityId, ComponentTypes.VELOCITY);
+        const physics = world.getComponent(entityId, ComponentTypes.PHYSICS);
+        velocity.vx += physics.acceleration.x * deltaTime;
+        velocity.vz += physics.acceleration.z * deltaTime;
+        const frictionFactor = Math.pow(physics.airResistance, deltaTime * 10);
+        velocity.vx *= frictionFactor;
+        velocity.vz *= frictionFactor;
+        if (physics.isGrounded) {
+          const groundFrictionFactor = Math.pow(physics.groundFriction, deltaTime * 8);
+          velocity.vx *= groundFrictionFactor;
+          velocity.vz *= groundFrictionFactor;
+        }
+        const currentSpeed = Math.hypot(velocity.vx, velocity.vz);
+        if (currentSpeed > physics.maxSpeed) {
+          const scale = physics.maxSpeed / currentSpeed;
+          velocity.vx *= scale;
+          velocity.vz *= scale;
+        }
+        if (Math.abs(velocity.vx) < 0.02) velocity.vx = 0;
+        if (Math.abs(velocity.vz) < 0.02) velocity.vz = 0;
+      }
+    });
+
+    world.addSystem((world, deltaTime) => {
+        const movableEntities = world.query([ComponentTypes.TRANSFORM, ComponentTypes.VELOCITY, ComponentTypes.PLAYER]);
+        for (const entityId of movableEntities) {
+            const transform = world.getComponent(entityId, ComponentTypes.TRANSFORM);
+            const velocity = world.getComponent(entityId, ComponentTypes.VELOCITY);
+            const oldX = transform.x;
+            const oldZ = transform.z;
+            const velX = velocity.vx;
+            const velZ = velocity.vz;
+
+            transform.x += velX * deltaTime;
+            if (checkCollision(transform.x, oldZ)) {
+                transform.x = oldX;
+                velocity.vx = 0;
+                if (Math.abs(velX) > 1.0) {
+                    audioSystem.playSound('collision');
+                }
+            }
+            transform.z += velZ * deltaTime;
+            if (checkCollision(transform.x, transform.z)) {
+                transform.z = oldZ;
+                velocity.vz = 0;
+                if (Math.abs(velZ) > 1.0) {
+                    audioSystem.playSound('collision');
+                }
+            }
+        }
+    });
+
+    world.addSystem((world, deltaTime) => {
+      const renderableEntities = world.query([ComponentTypes.TRANSFORM, ComponentTypes.RENDER]);
+      for (const entityId of renderableEntities) {
+        const transform = world.getComponent(entityId, ComponentTypes.TRANSFORM);
+        const render = world.getComponent(entityId, ComponentTypes.RENDER);
+        if (render.mesh) {
+          render.mesh.position.set(transform.x, transform.y, transform.z);
+          if (world.hasComponent(entityId, ComponentTypes.PLAYER)) {
+            const velocity = world.getComponent(entityId, ComponentTypes.VELOCITY);
+            render.mesh.rotation.x += velocity.vz * deltaTime * 0.5;
+            render.mesh.rotation.z -= velocity.vx * deltaTime * 0.5;
+          }
+        }
+      }
+    });
+
+    world.addSystem((world) => {
+        if (gameCompleted) return;
+        const player = world.query([ComponentTypes.PLAYER, ComponentTypes.TRANSFORM])[0];
+        if (!player) return;
+        
+        const playerTransform = world.getComponent(player, ComponentTypes.TRANSFORM);
+        const collectibles = world.query([ComponentTypes.COLLECTIBLE, ComponentTypes.TRANSFORM, ComponentTypes.RENDER]);
+
+        for (const collectibleId of collectibles) {
+            const collectibleTransform = world.getComponent(collectibleId, ComponentTypes.TRANSFORM);
+            const distance = Math.hypot(playerTransform.x - collectibleTransform.x, playerTransform.z - collectibleTransform.z);
+
+            if (distance < 0.5) {
+                const collectibleData = world.getComponent(collectibleId, ComponentTypes.COLLECTIBLE);
+                score += collectibleData.value;
+                document.getElementById('score').textContent = score;
+                
+                audioSystem.playSound('collect');
+
+                const render = world.getComponent(collectibleId, ComponentTypes.RENDER);
+                scene.remove(render.mesh);
+                world.removeEntity(collectibleId);
+            }
+        }
+    });
+
+    world.addSystem((world, deltaTime) => {
+      if (gameCompleted) return;
+      const players = world.query([ComponentTypes.PLAYER, ComponentTypes.TRANSFORM]);
+      const goals = world.query([ComponentTypes.GOAL, ComponentTypes.TRANSFORM]);
+      for (const playerId of players) {
+        const playerTransform = world.getComponent(playerId, ComponentTypes.TRANSFORM);
+        for (const goalId of goals) {
+          const goalTransform = world.getComponent(goalId, ComponentTypes.TRANSFORM);
+          const distance = Math.hypot(playerTransform.x - goalTransform.x, playerTransform.z - goalTransform.z);
+          if (distance < 1) {
+            gameCompleted = true;
+            const timeBonus = Math.max(0, 10000 - Math.floor(gameTime * 10));
+            score += timeBonus;
+            document.getElementById('score').textContent = score;
+
+            audioSystem.playSound('goal');
+            document.getElementById('goal-indicator').style.opacity = '1';
+            setTimeout(() => {
+              initializeGame();
+            }, 3000);
+          }
+        }
+      }
+    });
+    
+    world.addSystem((world, deltaTime) => {
+      if (gameCompleted) return;
+      gameTime = (performance.now() - levelStartTime) / 1000;
+      const minutes = Math.floor(gameTime / 60).toString().padStart(2, '0');
+      const seconds = Math.floor(gameTime % 60).toString().padStart(2, '0');
+      document.getElementById('timer').textContent = `${minutes}:${seconds}`;
+    });
+
+    world.addSystem((world, deltaTime) => {
+      if (!physicsDebugEnabled) return;
+      const players = world.query([ComponentTypes.PLAYER, ComponentTypes.VELOCITY, ComponentTypes.PHYSICS]);
+      for (const playerId of players) {
+        const velocity = world.getComponent(playerId, ComponentTypes.VELOCITY);
+        const physics = world.getComponent(playerId, ComponentTypes.PHYSICS);
+        const speed = Math.hypot(velocity.vx, velocity.vz);
+        document.getElementById('debug-speed').textContent = speed.toFixed(2);
+        document.getElementById('debug-vx').textContent = velocity.vx.toFixed(2);
+        document.getElementById('debug-vz').textContent = velocity.vz.toFixed(2);
+        document.getElementById('debug-ax').textContent = physics.acceleration.x.toFixed(2);
+        document.getElementById('debug-az').textContent = physics.acceleration.z.toFixed(2);
+        let inputX = 0, inputZ = 0;
+        if (keyState['KeyD'] || keyState['ArrowRight']) inputX = 1;
+        if (keyState['KeyA'] || keyState['ArrowLeft']) inputX = -1;
+        if (keyState['KeyS'] || keyState['ArrowDown']) inputZ = 1;
+        if (keyState['KeyW'] || keyState['ArrowUp']) inputZ = -1;
+        document.getElementById('debug-ix').textContent = inputX;
+        document.getElementById('debug-iz').textContent = inputZ;
+        break;
+      }
+    });
+  }
+
   function checkCollision(x,z,radius=.3){const buffer=.1;if(x<-COLS*CELL_SIZE/2+radius||x>COLS*CELL_SIZE/2-radius||z<-ROWS*CELL_SIZE/2+radius||z>ROWS*CELL_SIZE/2-radius)return!0;for(const wall of walls){const dx=Math.abs(x-wall.x),dz=Math.abs(z-wall.z);if(wall.horizontal){if(dz<radius+buffer&&dx<CELL_SIZE/2+radius)return!0}else if(dx<radius+buffer&&dz<CELL_SIZE/2+radius)return!0}return!1}
 
   /***** ──────────────────────────────────────────────────
-   * INPUT HANDLING (No Changes)
+   * INPUT HANDLING
    * ────────────────────────────────────────────────── */
   
   const keyState = {};
@@ -340,7 +783,7 @@ try {
   document.getElementById('toggle-sfx').addEventListener('click', () => { if (audioSystem) audioSystem.toggleSfx(); });
 
   /***** ──────────────────────────────────────────────────
-   * MAIN GAME LOOP (No Changes)
+   * MAIN GAME LOOP
    * ────────────────────────────────────────────────── */
   
   let lastTime = performance.now();
@@ -358,7 +801,7 @@ try {
   // Initialize and start the game
   initializeGame();
   gameLoop(lastTime);
-  console.log("🎮 Advanced Physics-Based Maze Game Loaded! V2.6 with Audio Fixed.");
+  console.log("🎮 Advanced Physics-Based Maze Game Loaded! V4 with Wall Sliding.");
 
 } catch (error) {
   console.error("Failed to initialize maze game:", error);
