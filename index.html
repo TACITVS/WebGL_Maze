@@ -1,592 +1,1621 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Advanced Procedural Maze · Special Zones</title>
+  <meta charset="utf-8">
+  <title>NEXUS MAZE - Professional Edition (ECS)</title>
   <style>
-    html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:'Arial',sans-serif;}
-    canvas{display:block}
+    @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap');
+    
+    body { 
+      margin: 0; 
+      padding: 0; 
+      background: linear-gradient(135deg, #0a0a0a, #1a1a2e, #16213e);
+      font-family: 'Orbitron', monospace;
+      overflow: hidden;
+      cursor: none;
+    }
+    
+    .custom-cursor {
+      position: fixed;
+      width: 20px;
+      height: 20px;
+      background: radial-gradient(circle, #00f4ff 30%, transparent 70%);
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 9999;
+      mix-blend-mode: screen;
+      transition: transform 0.1s ease;
+    }
     
     #ui {
       position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      pointer-events: none;
+      top: 20px;
+      left: 20px;
+      color: #00f4ff;
       z-index: 100;
-      color: #fff;
+      font-size: 14px;
+      background: linear-gradient(135deg, rgba(0,244,255,0.1), rgba(0,100,255,0.1));
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(0,244,255,0.3);
+      padding: 20px;
+      border-radius: 15px;
+      box-shadow: 0 8px 32px rgba(0,244,255,0.2);
+      transition: all 0.3s ease;
+    }
+    
+    #ui:hover {
+      background: linear-gradient(135deg, rgba(0,244,255,0.15), rgba(0,100,255,0.15));
+      box-shadow: 0 12px 40px rgba(0,244,255,0.3);
+    }
+    
+    .ui-title {
+      font-weight: 900;
+      font-size: 18px;
+      text-shadow: 0 0 10px #00f4ff;
+      margin-bottom: 10px;
+      background: linear-gradient(45deg, #00f4ff, #0080ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    
+    .ui-stat {
+      margin: 8px 0;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    
+    .ui-label {
+      color: #80c7ff;
+      text-shadow: 0 0 5px rgba(128,199,255,0.5);
+    }
+    
+    .ui-value {
+      color: #00f4ff;
+      font-weight: 700;
+      text-shadow: 0 0 10px #00f4ff;
+      min-width: 60px;
+      text-align: right;
     }
     
     #controls {
-      position: absolute;
-      top: 10px;
-      left: 10px;
-      background: rgba(0,0,0,0.8);
-      padding: 15px;
-      border-radius: 8px;
-      pointer-events: auto;
-      font-size: 14px;
-      max-width: 250px;
-    }
-
-    #hud {
-        position: absolute;
-        top: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        display: flex;
-        gap: 30px;
-        background: rgba(0,0,0,0.7);
-        padding: 10px 20px;
-        border-radius: 12px;
-        font-size: 22px;
-        font-weight: bold;
-        text-shadow: 1px 1px 2px #000;
+      margin-top: 15px;
+      padding-top: 15px;
+      border-top: 1px solid rgba(0,244,255,0.3);
+      font-size: 11px;
+      color: #60a0ff;
     }
     
-    #powerup-status {
-        position: absolute;
-        bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: rgba(0, 150, 255, 0.8);
-        padding: 10px 20px;
-        border-radius: 12px;
-        font-size: 18px;
-        font-weight: bold;
-        text-shadow: 1px 1px 2px #000;
-        opacity: 0;
-        transition: opacity 0.5s ease-in-out;
-    }
-    
-    #minimap-container {
-      position: absolute;
-      bottom: 20px;
-      right: 20px;
-      border: 3px solid #444;
-      border-radius: 8px;
-      background: rgba(0,0,0,0.9);
-      pointer-events: auto;
+    .control-group {
+      margin: 5px 0;
     }
     
     #minimap {
-      display: block;
-      border-radius: 5px;
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      width: 180px;
+      height: 180px;
+      border: 2px solid #00f4ff;
+      border-radius: 15px;
+      background: linear-gradient(135deg, rgba(0,20,40,0.9), rgba(0,40,80,0.9));
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 32px rgba(0,244,255,0.3);
+      overflow: hidden;
     }
     
-    #camera-info {
-      position: absolute;
-      top: 10px;
-      right: 10px;
-      background: rgba(0,0,0,0.8);
-      padding: 10px;
-      border-radius: 5px;
-      font-size: 16px;
-      font-weight: bold;
+    #loading {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(135deg, #0a0a0a, #1a1a2e, #16213e);
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
     }
     
-    #goal-indicator {
-      position: absolute;
-      top: 50%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      color: #00ff00;
-      font-size: 24px;
-      font-weight: bold;
-      text-shadow: 2px 2px 4px rgba(0,0,0,0.8);
-      opacity: 0;
-      transition: opacity 0.5s;
+    .loading-title {
+      font-size: 48px;
+      font-weight: 900;
+      background: linear-gradient(45deg, #00f4ff, #0080ff, #8000ff);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-shadow: 0 0 30px rgba(0,244,255,0.5);
+      margin-bottom: 20px;
+      animation: glow 2s ease-in-out infinite alternate;
     }
     
-    #physics-debug {
-      position: absolute;
-      bottom: 20px;
-      left: 20px;
-      background: rgba(0,0,0,0.8);
-      padding: 10px;
-      border-radius: 5px;
-      font-family: monospace;
-      font-size: 12px;
-      display: none;
+    .loading-subtitle {
+      color: #60a0ff;
+      font-size: 18px;
+      margin-bottom: 40px;
+      text-shadow: 0 0 10px rgba(96,160,255,0.5);
     }
-    .control-key {
-      background: rgba(255,255,255,0.2);
-      padding: 2px 6px;
-      border-radius: 3px;
-      font-family: monospace;
-      cursor: pointer;
-      display: inline-block;
-      min-width: 12px;
+    
+    .progress-bar {
+      width: 400px;
+      height: 4px;
+      background: rgba(0,244,255,0.2);
+      border-radius: 2px;
+      overflow: hidden;
+      margin-bottom: 20px;
+    }
+    
+    .progress-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #00f4ff, #0080ff);
+      border-radius: 2px;
+      width: 0%;
+      transition: width 0.3s ease;
+      box-shadow: 0 0 10px #00f4ff;
+    }
+    
+    #loading-status {
+      color: #80c7ff;
+      font-size: 14px;
       text-align: center;
     }
-    .muted {
-        text-decoration: line-through;
-        opacity: 0.5;
+
+    #audio-button {
+      position: absolute;
+      bottom: 20px;
+      right: 20px;
+      width: 50px;
+      height: 50px;
+      background: linear-gradient(135deg, rgba(0,244,255,0.2), rgba(0,100,255,0.2));
+      backdrop-filter: blur(10px);
+      border: 2px solid rgba(0,244,255,0.5);
+      border-radius: 50%;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 24px;
+      transition: all 0.3s ease;
+      z-index: 100;
+    }
+
+    #audio-button:hover {
+      background: linear-gradient(135deg, rgba(0,244,255,0.4), rgba(0,100,255,0.4));
+      box-shadow: 0 0 20px rgba(0,244,255,0.6);
+      transform: scale(1.1);
+    }
+
+    #audio-button.muted {
+      opacity: 0.5;
+    }
+    
+    @keyframes glow {
+      from { filter: drop-shadow(0 0 20px rgba(0,244,255,0.5)); }
+      to { filter: drop-shadow(0 0 40px rgba(0,244,255,0.8)); }
     }
   </style>
 </head>
 <body>
-<div id="ui">
-  <div id="hud">
-    <div>Time: <span id="timer">00:00</span></div>
-    <div>Score: <span id="score">0</span></div>
+  <div class="custom-cursor" id="cursor"></div>
+  <div id="loading">
+    <div class="loading-title">NEXUS MAZE</div>
+    <div class="loading-subtitle">Professional Edition</div>
+    <div class="progress-bar"><div class="progress-fill" id="progress"></div></div>
+    <div id="loading-status">Initializing quantum maze systems...</div>
   </div>
-
-  <div id="controls">
-    <div><strong>🎮 Controls</strong></div>
-    <div><span class="control-key">WASD</span> / <span class="control-key">Arrows</span> - Move</div>
-    <div><span class="control-key">C</span> - Switch Camera</div>
-    <div><span class="control-key">M</span> - Toggle Minimap</div>
-    <div><span class="control-key">R</span> - New Maze</div>
-    <div><span class="control-key">P</span> - Physics Debug</div>
-    
-    <div style="margin-top:10px;"><strong>🔊 Audio</strong></div>
-    <div><span class="control-key" id="toggle-music">J</span> - Music</div>
-    <div><span class="control-key" id="toggle-sfx">K</span> - SFX</div>
-
-    <div style="margin-top:10px;"><strong>🎯 Goal:</strong> Find the green exit!</div>
-    <div style="margin-top:5px;font-size:11px;opacity:0.8;">
-      <em>Collect coins for more points!</em>
+  <div id="ui" style="display: none;">
+    <div class="ui-title">⬢ NEXUS CONTROL</div>
+    <div class="ui-stat"><span class="ui-label">SCORE</span><span class="ui-value" id="score">0</span></div>
+    <div class="ui-stat"><span class="ui-label">TIME</span><span class="ui-value" id="time">0s</span></div>
+    <div class="ui-stat"><span class="ui-label">LEVEL</span><span class="ui-value" id="level">1</span></div>
+    <div class="ui-stat"><span class="ui-label">HEALTH</span><span class="ui-value" id="health">💚 100%</span></div>
+    <div class="ui-stat"><span class="ui-label">ENERGY</span><span class="ui-value" id="energy">⚡ 100%</span></div>
+    <div class="ui-stat"><span class="ui-label">COORDS</span><span class="ui-value" id="position">(0, 0)</span></div>
+    <div id="controls">
+      <div class="control-group"><strong>MOVEMENT:</strong> WASD / Arrows</div>
+      <div class="control-group"><strong>BOOST:</strong> Hold SHIFT</div>
+      <div class="control-group" id="jump-status"><strong>QUANTUM JUMP:</strong> SPACE</div>
+      <div class="control-group"><strong>NEW MAZE:</strong> R Key</div>
+      <div class="control-group"><strong>CAMERA:</strong> C Key</div>
+      <div class="control-group"><strong>SOUND:</strong> M Key</div>
     </div>
   </div>
-  
-  <div id="camera-info">Third Person</div>
-  <div id="powerup-status">SPEED BOOST!</div>
-  
-  <div id="minimap-container">
-    <canvas id="minimap" width="200" height="200"></canvas>
-  </div>
-  
-  <div id="goal-indicator">🎉 MAZE COMPLETED! 🎉</div>
-  
-  <div id="physics-debug">
-    <div><strong>Physics Debug</strong></div>
-    <div>Speed: <span id="debug-speed">0.00</span> m/s</div>
-    <div>Velocity: (<span id="debug-vx">0.00</span>, <span id="debug-vz">0.00</span>)</div>
-    <div>Accel: (<span id="debug-ax">0.00</span>, <span id="debug-az">0.00</span>)</div>
-    <div>Input: (<span id="debug-ix">0</span>, <span id="debug-iz">0</span>)</div>
-  </div>
-</div>
+  <canvas id="minimap" style="display: none;"></canvas>
+  <button id="audio-button" style="display: none;">🔊</button>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/howler/2.2.3/howler.min.js"></script>
-
-<script>
-try {
-  /***** ──────────────────────────────────────────────────
-   * PHYSICS CONFIGURATION
-   * ────────────────────────────────────────────────── */
-  const physicsConfig = {
-    mass: 1.0,
-    maxSpeed: 5.0,
-    moveForce: 12.0,
-    airResistance: 0.98,
-    groundFriction: 0.9,
-    bounciness: 0.4,
-    wallFriction: 0.9,
-  };
-
-  /***** ──────────────────────────────────────────────────
-   * ECS ARCHITECTURE
-   * ────────────────────────────────────────────────── */
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
   
-  const ComponentTypes = { 
-    TRANSFORM: 'transform', VELOCITY: 'velocity', PHYSICS: 'physics', RENDER: 'render', PLAYER: 'player', 
-    GOAL: 'goal', LIGHT: 'light', COLLECTIBLE: 'collectible', POWER_UP: 'powerup'
-  };
-
-  class ECSWorld {
-    constructor() {
-      this.entities = new Map();
-      this.components = new Map();
-      this.systems = [];
-      this.nextEntityId = 1;
-      
-      Object.values(ComponentTypes).forEach(type => {
-        this.components.set(type, new Map());
-      });
-    }
-    
-    createEntity() {
-      const id = this.nextEntityId++;
-      this.entities.set(id, new Set());
-      return id;
-    }
-    
-    addComponent(entityId, componentType, data = {}) {
-      if (!this.entities.has(entityId)) return false;
-      this.entities.get(entityId).add(componentType);
-      this.components.get(componentType).set(entityId, data);
-      return true;
-    }
-    
-    getComponent(entityId, componentType) {
-      return this.components.get(componentType).get(entityId);
-    }
-    
-    hasComponent(entityId, componentType) {
-      return this.entities.has(entityId) && this.entities.get(entityId).has(componentType);
-    }
-    
-    removeComponent(entityId, componentType) {
-        if (!this.hasComponent(entityId, componentType)) return;
-        this.entities.get(entityId).delete(componentType);
-        this.components.get(componentType).delete(entityId);
-    }
-
-    removeEntity(entityId) {
-        if (!this.entities.has(entityId)) return;
-        this.entities.get(entityId).forEach(componentType => {
-            this.removeComponent(entityId, componentType);
-        });
-        this.entities.delete(entityId);
-    }
-    
-    query(componentTypes) {
-      const results = [];
-      for (const [entityId, entityComponents] of this.entities) {
-        if (componentTypes.every(type => entityComponents.has(type))) {
-          results.push(entityId);
+  <script>
+    class SimpleECS {
+        constructor() {
+            this.entities = new Set();
+            this.nextEntityId = 1;
+            this.componentRegistry = new Map();
+            this.queryCache = new Map();
         }
-      }
-      return results;
-    }
-    
-    addSystem(systemFunction) {
-      this.systems.push(systemFunction);
-    }
-    
-    update(deltaTime) {
-      this.systems.forEach(system => system(this, deltaTime));
-    }
-  }
 
-  /***** ──────────────────────────────────────────────────
-   * MAZE GENERATION
-   * ────────────────────────────────────────────────── */
-  
-  function generateSolvableMaze(cols, rows) {
-    const grid = Array(rows).fill(0).map(() => Array(cols).fill(0).map(() => ({ visited: false, walls: [true, true, true, true], isPath: false, zone: null })));
-    const stack = [];
-    let current = {r: 0, c: 0};
-    grid[0][0].visited = true;
-    const directions = [[-1, 0, 0, 2], [0, 1, 1, 3], [1, 0, 2, 0], [0, -1, 3, 1]];
-    do {
-      const {r, c} = current;
-      const neighbors = directions.filter(([dr, dc]) => {
-        const nr = r + dr; const nc = c + dc;
-        return nr >= 0 && nr < rows && nc >= 0 && nc < cols && !grid[nr][nc].visited;
-      });
-      if (neighbors.length > 0) {
-        const [dr, dc, wallIdx, oppositeIdx] = neighbors[Math.floor(Math.random() * neighbors.length)];
-        const nr = current.r + dr; const nc = current.c + dc;
-        grid[current.r][current.c].walls[wallIdx] = false;
-        grid[nr][nc].visited = true;
-        grid[nr][nc].walls[oppositeIdx] = false;
-        stack.push(current);
-        current = {r: nr, c: nc};
-      } else {
-        current = stack.pop();
-      }
-    } while (stack.length > 0);
-    
-    // Designate a central ice zone
-    const zoneSize = 5;
-    const zoneStartR = Math.floor(rows / 2 - zoneSize / 2);
-    const zoneStartC = Math.floor(cols / 2 - zoneSize / 2);
-    for (let r = zoneStartR; r < zoneStartR + zoneSize; r++) {
-      for (let c = zoneStartC; c < zoneStartC + zoneSize; c++) {
-        if (grid[r] && grid[r][c]) {
-          grid[r][c].zone = 'ice';
+        createWorld() {
+            return this;
         }
-      }
+
+        addEntity() {
+            const id = this.nextEntityId++;
+            this.entities.add(id);
+            return id;
+        }
+
+        removeEntity(world, id) {
+            if (!this.entities.has(id)) return;
+            this.entities.delete(id);
+            for (const cache of this.queryCache.values()) {
+                cache.delete(id);
+            }
+            for (const component of this.componentRegistry.values()) {
+                delete component.data[id];
+            }
+        }
+        
+        _updateCaches(id) {
+            for (const [queryKey, cache] of this.queryCache.entries()) {
+                const components = queryKey.split(',').map(name => this.componentRegistry.get(name));
+                const matches = components.every(c => c.has(id));
+
+                if (matches) {
+                    cache.add(id);
+                } else {
+                    cache.delete(id);
+                }
+            }
+        }
+
+        defineComponent(schema = {}) {
+            const componentData = {};
+            const componentName = `c${this.componentRegistry.size}`;
+            
+            const component = {
+                name: componentName,
+                data: componentData,
+                add: (id, initialValues = {}) => {
+                    componentData[id] = { ...initialValues };
+                    this._updateCaches(id);
+                },
+                has: (id) => id in componentData,
+                get: (id) => componentData[id],
+                remove: (id) => {
+                    const existed = id in componentData;
+                    if (existed) {
+                        delete componentData[id];
+                        this._updateCaches(id);
+                    }
+                }
+            };
+            
+            this.componentRegistry.set(componentName, component);
+            return component;
+        }
+
+        addComponent(world, component, id, initialValues = {}) {
+            component.add(id, initialValues);
+        }
+
+        hasComponent(world, component, id) {
+            return component.has(id);
+        }
+
+        removeComponent(world, component, id) {
+            component.remove(id);
+        }
+        
+        defineQuery(components) {
+            const queryKey = components.map(c => c.name).sort().join(',');
+
+            if (!this.queryCache.has(queryKey)) {
+                const cache = new Set();
+                for (const id of this.entities) {
+                    if (components.every(c => c.has(id))) {
+                        cache.add(id);
+                    }
+                }
+                this.queryCache.set(queryKey, cache);
+            }
+
+            return (world) => {
+                return this.queryCache.get(queryKey);
+            };
+        }
+
+        entityExists(world, id) {
+            return this.entities.has(id);
+        }
+    }
+
+    class Emitter {
+        constructor() {
+            this.events = {};
+        }
+        on(event, listener) {
+            if (!this.events[event]) {
+                this.events[event] = [];
+            }
+            this.events[event].push(listener);
+        }
+        emit(event, payload) {
+            if (this.events[event]) {
+                this.events[event].forEach(listener => listener(payload));
+            }
+        }
+    }
+
+    class GameStateManager extends Emitter {
+        constructor() {
+            super();
+            this.reset();
+        }
+
+        get score() { return this._score; }
+        set score(value) {
+            this._score = value;
+            this.emit('scoreChanged', this._score);
+        }
+
+        get health() { return this._health; }
+        set health(value) {
+            const newHealth = Math.max(0, Math.min(100, value));
+            if (this._health !== newHealth) {
+                this._health = newHealth;
+                this.emit('healthChanged', this._health);
+            }
+        }
+        
+        get energy() { return this._energy; }
+        set energy(value) {
+            const newEnergy = Math.max(0, Math.min(100, value));
+             if (this._energy !== newEnergy) {
+                this._energy = newEnergy;
+                this.emit('energyChanged', this._energy);
+            }
+        }
+
+        get level() { return this._level; }
+        set level(value) {
+            this._level = value;
+            this.emit('levelChanged', this._level);
+        }
+        
+        addScore(points, multiplier = 1) {
+            this.score += points * multiplier;
+        }
+
+        reset() {
+            this.score = 0;
+            this.health = 100;
+            this.energy = 100;
+            this.level = 1;
+        }
+    }
+
+    const ecs = new SimpleECS();
+    const world = ecs.createWorld();
+
+    class NexusMazeGame {
+        constructor() {
+            this.world = world;
+            this.defineComponents();
+            
+            this.particlePool = [];
+            
+            this.gameState = new GameStateManager();
+            
+            this.actionMap = {
+                'KeyW': 'MOVE_FORWARD',
+                'ArrowUp': 'MOVE_FORWARD',
+                'KeyS': 'MOVE_BACK',
+                'ArrowDown': 'MOVE_BACK',
+                'KeyA': 'MOVE_LEFT',
+                'ArrowLeft': 'MOVE_LEFT',
+                'KeyD': 'MOVE_RIGHT',
+                'ArrowRight': 'MOVE_RIGHT',
+                'Space': 'JUMP',
+                'ShiftLeft': 'BOOST',
+                'ShiftRight': 'BOOST'
+            };
+            this.activeActions = new Set();
+
+            this.constants = {
+                INITIAL_MAZE_SIZE: 31, CELL_SIZE: 2.5, WALL_HEIGHT: 3,
+                JUMP_COST: 25, JUMP_COOLDOWN: 1500,
+                PARTICLE_POOL_SIZE: 300,
+                // MODIFIED: Tuned physics values for a weightier feel
+                PLAYER_FORCE: 35.0,
+                JUMP_FORCE: 25.0,
+                FRICTION: 0.96, // A little less friction to allow for more coasting
+                PLAYER_RADIUS: 0.5,
+                // NEW: Bounciness factor for walls
+                WALL_RESTITUTION: 0.4
+            };
+            this.colors = {
+                primary: 0x00f4ff, secondary: 0x0080ff, accent: 0x8000ff,
+                warning: 0xff6b00, success: 0x00ff80, wall: 0x2a4858,
+                ground: 0x1a2332,
+                // NEW: Color for sparks
+                sparks: 0xffd700
+            };
+
+            this.state = {
+                scene: null, camera: null, renderer: null,
+                playerEid: -1, maze: [],
+                startTime: null, lastTime: 0,
+                cameraMode: 'third', gameState: 'playing',
+                currentMazeSize: this.constants.INITIAL_MAZE_SIZE,
+                groundMesh: null, gridHelper: null,
+                jumpReady: true,
+                minimapCanvas: null, minimapCtx: null,
+                audioContext: null, audioReady: false,
+                screenShake: 0,
+                effectsQueue: [],
+                audioMuted: false, audioInitialized: false,
+                moveTimer: 0, ambientFilter: null
+            };
+
+            this.uiElements = {};
+            this.init();
+        }
+        
+        defineComponents() {
+            this.Position = ecs.defineComponent();
+            this.Velocity = ecs.defineComponent();
+            this.ThreeJSObject = ecs.defineComponent();
+            this.threeJSObjectMap = new Map();
+
+            this.Player = ecs.defineComponent();
+            this.Wall = ecs.defineComponent();
+            this.Collectible = ecs.defineComponent();
+            this.Goal = ecs.defineComponent();
+            this.Particle = ecs.defineComponent();
+            this.Trail = ecs.defineComponent();
+            this.Animation = ecs.defineComponent();
+            
+            this.Enemy = ecs.defineComponent();
+            this.PowerUp = ecs.defineComponent();
+            this.MovingWall = ecs.defineComponent();
+            this.Health = ecs.defineComponent();
+            this.AI = ecs.defineComponent();
+            this.Effect = ecs.defineComponent();
+            this.Timer = ecs.defineComponent();
+
+            this.EffectTimer = ecs.defineComponent();
+            this.SpeedBoost = ecs.defineComponent();
+            this.InvulnerabilityShield = ecs.defineComponent();
+            this.ScoreMultiplierEffect = ecs.defineComponent();
+        }
+
+        async init() {
+            this._setupCursor();
+            this._setupAudioButton();
+            await this._runLoadingSequence();
+            this._cacheUIElements();
+            this._initializeUI();
+            this._addEventListeners();
+            this._initThreeJS();
+            this._initializeParticlePool();
+            this._createLevel();
+            this.state.startTime = Date.now();
+            this._animate(0);
+        }
+
+        _setupCursor() {
+            document.addEventListener('mousemove', (e) => {
+                const cursor = document.getElementById('cursor');
+                if(cursor) {
+                    cursor.style.left = e.clientX - 10 + 'px';
+                    cursor.style.top = e.clientY - 10 + 'px';
+                }
+            });
+        }
+
+        _setupAudioButton() {
+            const audioButton = document.getElementById('audio-button');
+            if (audioButton) {
+                audioButton.addEventListener('click', () => {
+                    this._toggleAudio();
+                });
+            }
+        }
+
+        async _initAudioOnUserGesture() {
+            if (this.state.audioInitialized) return;
+            
+            try {
+                await Tone.start();
+                console.log('Audio context started');
+                this.state.audioInitialized = true;
+                this._createAudioSources();
+                this._startAmbientSound();
+            } catch (e) {
+                console.warn("Failed to start audio:", e);
+            }
+        }
+
+        _toggleAudio() {
+            this.state.audioMuted = !this.state.audioMuted;
+            const audioButton = document.getElementById('audio-button');
+            
+            if (this.state.audioMuted) {
+                Tone.Master.mute = true;
+                audioButton.textContent = '🔇';
+                audioButton.classList.add('muted');
+            } else {
+                Tone.Master.mute = false;
+                audioButton.textContent = '🔊';
+                
+                if (!this.state.audioInitialized) {
+                    this._initAudioOnUserGesture();
+                }
+            }
+        }
+
+        _createAudioSources() {
+            if (!this.state.audioInitialized) return;
+            
+            try {
+                const reverb = new Tone.Reverb({ decay: 1.5, wet: 0.2 }).toDestination();
+                const delay = new Tone.FeedbackDelay({ delayTime: "16n", feedback: 0.2, wet: 0.1 }).connect(reverb);
+                this.state.moveSynth = new Tone.MonoSynth({ oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.05 }, volume: -20 }).connect(delay);
+                this.state.jumpSynth = new Tone.MonoSynth({ oscillator: { type: "square" }, envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.1 }, filterEnvelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.1, baseFrequency: 200, octaves: 4 }, volume: -10 }).connect(reverb);
+                this.state.collectSynth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "triangle" }, envelope: { attack: 0.001, decay: 0.2, sustain: 0.1, release: 0.5 }, volume: -12 }).connect(reverb);
+                this.state.powerUpSynth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "sawtooth" }, envelope: { attack: 0.05, decay: 0.2, sustain: 0.4, release: 0.8 }, volume: -8 }).connect(reverb);
+                this.state.levelUpSynth = new Tone.PolySynth(Tone.Synth, { oscillator: { type: "square" }, envelope: { attack: 0.02, decay: 0.1, sustain: 0.6, release: 0.8 }, volume: -6 }).connect(reverb);
+                this.state.damageSynth = new Tone.NoiseSynth({ noise: { type: "pink" }, envelope: { attack: 0.001, decay: 0.2, sustain: 0, release: 0.1 }, volume: -8 }).connect(new Tone.Filter(800, "lowpass").connect(reverb));
+                this.state.damageSubSynth = new Tone.MonoSynth({ oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.3, sustain: 0, release: 0.1 }, volume: -6 }).toDestination();
+                this.state.alertSynth = new Tone.MonoSynth({ oscillator: { type: "pulse", width: 0.1 }, envelope: { attack: 0.01, decay: 0.05, sustain: 0.5, release: 0.1 }, volume: -15 }).connect(delay);
+                this.state.boostSynth = new Tone.Noise({ type: "white", volume: -20 }).connect(new Tone.Filter({ frequency: 2000, type: "bandpass", rolloff: -24 }).connect(reverb));
+                this.state.boostEnvelope = new Tone.AmplitudeEnvelope({ attack: 0.1, decay: 0, sustain: 1, release: 0.3 }).toDestination();
+                this.state.boostSynth.connect(this.state.boostEnvelope);
+                this.state.uiClickSynth = new Tone.MonoSynth({ oscillator: { type: "sine" }, envelope: { attack: 0.001, decay: 0.05, sustain: 0, release: 0.05 }, volume: -18 }).toDestination();
+                this.state.ambientDrone = new Tone.Oscillator({ frequency: 55, type: "sine", volume: -30 }).toDestination();
+                this.state.ambientPulse = new Tone.Oscillator({ frequency: 110, type: "triangle", volume: -35 }).toDestination();
+                this.state.ambientLFO = new Tone.LFO({ frequency: "8n", min: 0.5, max: 1 });
+                this.state.ambientFilter = new Tone.Filter({ frequency: 800, type: "lowpass", rolloff: -12 }).toDestination();
+                this.state.ambientDrone.connect(this.state.ambientFilter);
+                this.state.ambientPulse.connect(this.state.ambientFilter);
+                this.state.ambientLFO.connect(this.state.ambientFilter.frequency);
+                console.log("Audio sources created successfully");
+            } catch (e) {
+                console.error("Failed to create audio sources:", e);
+            }
+        }
+
+        _startAmbientSound() {
+            if (!this.state.audioInitialized) return;
+            
+            try {
+                this.state.ambientDrone?.start();
+                this.state.ambientPulse?.start();
+                this.state.ambientLFO?.start();
+            } catch (e) {
+                console.warn("Failed to start ambient sound:", e);
+            }
+        }
+
+        _playSound(soundName, options = {}) {
+            if (!this.state.audioInitialized || this.state.audioMuted) return;
+            
+            try {
+                const now = Tone.now();
+                
+                switch(soundName) {
+                    case 'move':
+                        if (this.state.moveSynth) {
+                            const baseFreq = 80 + Math.random() * 40;
+                            this.state.moveSynth.triggerAttackRelease(baseFreq, "32n", now);
+                        }
+                        break;
+                    case 'jump':
+                        if (this.state.jumpSynth) {
+                            this.state.jumpSynth.triggerAttackRelease("C2", "8n", now);
+                            this.state.jumpSynth.triggerAttackRelease("G3", "16n", now + 0.05);
+                        }
+                        break;
+                    case 'collect':
+                        if (this.state.collectSynth) {
+                            const collectNotes = ["E5", "G5", "B5", "E6"];
+                            collectNotes.forEach((note, i) => {
+                                this.state.collectSynth.triggerAttackRelease(note, "32n", now + i * 0.05);
+                            });
+                        }
+                        break;
+                    case 'powerUp':
+                        if (this.state.powerUpSynth) {
+                            const chords = [["C4", "E4", "G4", "C5"], ["D4", "F#4", "A4", "D5"], ["E4", "G#4", "B4", "E5"], ["F4", "A4", "C5", "F5"]];
+                            chords.forEach((chord, i) => {
+                                this.state.powerUpSynth.triggerAttackRelease(chord, "8n", now + i * 0.15);
+                            });
+                        }
+                        break;
+                    case 'levelUp':
+                        if (this.state.levelUpSynth) {
+                            const melody = [{ note: "C5", duration: "8n", time: 0 }, { note: "C5", duration: "16n", time: 0.1 }, { note: "C5", duration: "16n", time: 0.2 }, { note: "G4", duration: "8n", time: 0.3 }, { note: "E5", duration: "8n", time: 0.5 }, { note: "G5", duration: "4n", time: 0.7 }, { note: "E5", duration: "8n", time: 1.0 }, { note: "C5", duration: "2n", time: 1.2 }];
+                            melody.forEach(({ note, duration, time }) => {
+                                this.state.levelUpSynth.triggerAttackRelease(note, duration, now + time);
+                            });
+                        }
+                        break;
+                    case 'damage':
+                        if (this.state.damageSynth && this.state.damageSubSynth) {
+                            this.state.damageSynth.triggerAttackRelease("16n", now);
+                            this.state.damageSubSynth.triggerAttackRelease("C1", "8n", now);
+                        }
+                        break;
+                    case 'enemyAlert':
+                        if (this.state.alertSynth) {
+                            this.state.alertSynth.triggerAttackRelease("A4", "32n", now);
+                            this.state.alertSynth.triggerAttackRelease("F4", "32n", now + 0.1);
+                        }
+                        break;
+                    case 'boost':
+                        if (this.state.boostEnvelope) { this.state.boostEnvelope.triggerAttack(now); }
+                        break;
+                    case 'boostEnd':
+                        if (this.state.boostEnvelope) { this.state.boostEnvelope.triggerRelease(now); }
+                        break;
+                    case 'uiClick':
+                        if (this.state.uiClickSynth) { this.state.uiClickSynth.triggerAttackRelease(800, "64n", now); }
+                        break;
+                    // NEW: A sound for wall scrapes/sparks
+                    case 'scrape':
+                        if (this.state.moveSynth) {
+                           this.state.moveSynth.triggerAttackRelease(400 + Math.random() * 200, "64n", now);
+                        }
+                        break;
+                }
+            } catch (e) { /* Silently handle audio errors */ }
+        }
+
+        _updateAmbientSound() {
+            if (!this.state.audioInitialized || !this.state.ambientFilter) return;
+            try {
+                const targetFreq = this.state.gameState === 'playing' ? 800 + (this.gameState.level * 50) + (this.gameState.health < 30 ? 200 : 0) : 400;
+                this.state.ambientFilter.frequency.rampTo(targetFreq, 2);
+            } catch (e) { /* Silent fail */ }
+        }
+
+        _triggerScreenShake(intensity = 10) { this.state.screenShake = intensity; }
+
+        _queueScoreEffect(points) {
+            this.state.effectsQueue.push({
+                type: 'score',
+                value: points,
+                time: Date.now()
+            });
+        }
+
+        async _runLoadingSequence() {
+             const updateProgress = (p, s) => {
+                const pf = document.getElementById('progress');
+                const st = document.getElementById('loading-status');
+                if (pf) pf.style.width = p + '%';
+                if (st) st.textContent = s;
+            };
+            const steps = [ { p: 30, t: 'Calibrating physics engine...' }, { p: 70, t: 'Initializing particle systems...' }, { p: 100, t: 'NEXUS MAZE ready!' } ];
+            for (const step of steps) {
+                await new Promise(r => setTimeout(r, 200));
+                updateProgress(step.p, step.t);
+            }
+            return new Promise(resolve => {
+                setTimeout(() => {
+                    const ls = document.getElementById('loading');
+                    ls.style.opacity = '0';
+                    setTimeout(() => {
+                        ls.style.display = 'none';
+                        document.getElementById('ui').style.display = 'block';
+                        document.getElementById('minimap').style.display = 'block';
+                        document.getElementById('audio-button').style.display = 'flex';
+                        resolve();
+                    }, 1000);
+                }, 500);
+            });
+        }
+        
+        _cacheUIElements() {
+            this.uiElements = { score: document.getElementById('score'), time: document.getElementById('time'), level: document.getElementById('level'), health: document.getElementById('health'), energy: document.getElementById('energy'), position: document.getElementById('position'), jumpStatus: document.getElementById('jump-status') };
+        }
+
+        _initializeUI() {
+            const { score, level, health, energy } = this.uiElements;
+            const { gameState } = this;
+
+            gameState.on('scoreChanged', (newScore) => {
+                score.textContent = newScore.toLocaleString();
+            });
+
+            gameState.on('levelChanged', (newLevel) => {
+                level.textContent = newLevel;
+            });
+
+            gameState.on('healthChanged', (newHealth) => {
+                const healthPercent = Math.floor(newHealth);
+                const healthIcon = healthPercent > 60 ? '💚' : healthPercent > 30 ? '💛' : '❤️';
+                health.textContent = `${healthIcon} ${healthPercent}%`;
+                health.style.color = healthPercent > 60 ? '#00ff80' : healthPercent > 30 ? '#ffff00' : '#ff4040';
+            });
+
+            gameState.on('energyChanged', (newEnergy) => {
+                const energyPercent = Math.floor(newEnergy);
+                const speedBonus = ecs.hasComponent(this.world, this.SpeedBoost, this.state.playerEid) ? '🚀' : '';
+                energy.textContent = `⚡ ${energyPercent}% ${speedBonus}`;
+            });
+            
+            gameState.emit('scoreChanged', gameState.score);
+            gameState.emit('levelChanged', gameState.level);
+            gameState.emit('healthChanged', gameState.health);
+            gameState.emit('energyChanged', gameState.energy);
+        }
+
+        _addEventListeners() {
+            const initAudio = async () => {
+                if (!this.state.audioInitialized && !this.state.audioMuted) { await this._initAudioOnUserGesture(); }
+                document.removeEventListener('keydown', initAudio);
+                document.removeEventListener('click', initAudio);
+                document.removeEventListener('touchstart', initAudio);
+            };
+            document.addEventListener('keydown', initAudio);
+            document.addEventListener('click', initAudio);
+            document.addEventListener('touchstart', initAudio);
+            
+            window.addEventListener('keydown', e => {
+                if (e.code === 'KeyR') { this._createLevel(); this.gameState.score = Math.max(0, this.gameState.score - 50); this._playSound('uiClick'); } 
+                else if (e.code === 'KeyC') { this.state.cameraMode = this.state.cameraMode === 'third' ? 'first' : 'third'; this._playSound('uiClick'); } 
+                else if (e.code === 'KeyM') { this._toggleAudio(); }
+
+                const action = this.actionMap[e.code];
+                if (action) {
+                    this.activeActions.add(action);
+                }
+            });
+            
+            window.addEventListener('keyup', e => {
+                const action = this.actionMap[e.code];
+                if (action) {
+                    this.activeActions.delete(action);
+                }
+                
+                if (action === 'BOOST' && !this.activeActions.has('BOOST')) {
+                    this._playSound('boostEnd');
+                }
+            });
+
+            window.addEventListener('resize', () => {
+                if (this.state.camera && this.state.renderer) {
+                    this.state.camera.aspect = window.innerWidth / window.innerHeight;
+                    this.state.camera.updateProjectionMatrix();
+                    this.state.renderer.setSize(window.innerWidth, window.innerHeight);
+                }
+            });
+        }
+
+        _initThreeJS() {
+            this.state.scene = new THREE.Scene();
+            this.state.scene.background = new THREE.Color(0x0a0f1a);
+            this.state.scene.fog = new THREE.FogExp2(0x0a0f1a, 0.02);
+            this.state.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            this.state.renderer = new THREE.WebGLRenderer({ antialias: true });
+            this.state.renderer.setSize(window.innerWidth, window.innerHeight);
+            this.state.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            this.state.renderer.shadowMap.enabled = true;
+            this.state.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            document.body.appendChild(this.state.renderer.domElement);
+            this.state.scene.add(new THREE.AmbientLight(this.colors.primary, 0.3));
+            const mainLight = new THREE.DirectionalLight(this.colors.primary, 1.5);
+            mainLight.position.set(50, 100, 50);
+            mainLight.castShadow = true;
+            mainLight.shadow.mapSize.width = 2048; 
+            mainLight.shadow.mapSize.height = 2048;
+            this.state.scene.add(mainLight);
+            this.state.minimapCanvas = document.getElementById('minimap');
+            this.state.minimapCtx = this.state.minimapCanvas.getContext('2d');
+            this.state.minimapCanvas.width = 180;
+            this.state.minimapCanvas.height = 180;
+        }
+
+        _initializeParticlePool() {
+            const geometry = new THREE.SphereGeometry(0.05, 8, 8);
+            const material = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true });
+
+            for (let i = 0; i < this.constants.PARTICLE_POOL_SIZE; i++) {
+                const eid = ecs.addEntity(this.world);
+                const mesh = new THREE.Mesh(geometry, material.clone());
+                mesh.visible = false;
+                this.state.scene.add(mesh);
+                this.threeJSObjectMap.set(eid, mesh);
+                
+                ecs.addComponent(this.world, this.Particle, eid, { active: false, life: 0, maxLife: 60 });
+                ecs.addComponent(this.world, this.Position, eid, { x: 0, y: 0, z: 0 });
+                ecs.addComponent(this.world, this.Velocity, eid, { x: 0, y: 0, z: 0 });
+                ecs.addComponent(this.world, this.ThreeJSObject, eid, { eid });
+                
+                this.particlePool.push(eid);
+            }
+        }
+
+        _generateMaze(width, height) {
+            const maze = Array(height).fill(null).map(() => Array(width).fill(1));
+            const stack = [{ x: 1, y: 1 }];
+            maze[1][1] = 0;
+            while (stack.length > 0) {
+                const current = stack[stack.length - 1];
+                const neighbors = [];
+                const directions = [{ x: 0, y: -2 }, { x: 2, y: 0 }, { x: 0, y: 2 }, { x: -2, y: 0 }];
+                for (const dir of directions) {
+                    const nx = current.x + dir.x; const ny = current.y + dir.y;
+                    if (nx > 0 && nx < width - 1 && ny > 0 && ny < height - 1 && maze[ny][nx] === 1) {
+                        neighbors.push({ x: nx, y: ny, dir });
+                    }
+                }
+                if (neighbors.length > 0) {
+                    const chosen = neighbors[Math.floor(Math.random() * neighbors.length)];
+                    maze[chosen.y][chosen.x] = 0;
+                    maze[current.y + chosen.dir.y / 2][current.x + chosen.dir.x / 2] = 0;
+                    stack.push(chosen);
+                } else { stack.pop(); }
+            }
+            const complexityPasses = Math.floor(width * height * 0.003);
+            for (let i = 0; i < complexityPasses; i++) {
+                const x = 2 + Math.floor(Math.random() * (width - 4));
+                const y = 2 + Math.floor(Math.random() * (height - 4));
+                if (x % 2 === 0 && y % 2 === 1) maze[y][x] = 0;
+                if (x % 2 === 1 && y % 2 === 0) maze[y][x] = 0;
+            }
+            return maze;
+        }
+
+        _createLevel() {
+            const timerQuery = ecs.defineQuery([this.EffectTimer]);
+            for (const eid of [...timerQuery(this.world)]) {
+                ecs.removeEntity(this.world, eid);
+            }
+            
+            const allEntities = [...ecs.entities];
+            for(const eid of allEntities) {
+                if (ecs.hasComponent(this.world, this.Particle, eid)) continue;
+                const mesh = this.threeJSObjectMap.get(eid);
+                if (mesh) this.state.scene.remove(mesh);
+                ecs.removeEntity(this.world, eid);
+                this.threeJSObjectMap.delete(eid);
+            }
+
+            if(this.state.groundMesh) this.state.scene.remove(this.state.groundMesh);
+            if(this.state.gridHelper) this.state.scene.remove(this.state.gridHelper);
+
+            const size = Math.min(this.constants.INITIAL_MAZE_SIZE + Math.floor(this.gameState.level / 2) * 4, 71);
+            this.state.currentMazeSize = size;
+            this.state.maze = this._generateMaze(size, size);
+            this._createGround(size);
+            this._createEntitiesFromMaze(size);
+            this.state.gameState = 'playing';
+            this._updateAmbientSound();
+        }
+        
+        _createGround(size) {
+            const groundSize = size * this.constants.CELL_SIZE;
+            this.state.groundMesh = new THREE.Mesh( new THREE.PlaneGeometry(groundSize, groundSize), new THREE.MeshStandardMaterial({ color: this.colors.ground, roughness: 0.8 }) );
+            this.state.groundMesh.rotation.x = -Math.PI / 2;
+            this.state.groundMesh.receiveShadow = true;
+            this.state.scene.add(this.state.groundMesh);
+            this.state.gridHelper = new THREE.GridHelper(groundSize, size * 2, this.colors.primary, this.colors.primary);
+            this.state.gridHelper.material.opacity = 0.1;
+            this.state.gridHelper.material.transparent = true;
+            this.state.scene.add(this.state.gridHelper);
+        }
+
+        _createEntitiesFromMaze(size) {
+            let startX = 1, startZ = 1, endX = size - 2, endZ = size - 2;
+            this.state.playerEid = this._createPlayer((startX - size / 2) * this.constants.CELL_SIZE, 1.2, (startZ - size / 2) * this.constants.CELL_SIZE);
+            this._createTrail();
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    if (this.state.maze[y][x] === 1) { 
+                        const worldX = (x - size / 2) * this.constants.CELL_SIZE;
+                        const worldZ = (y - size / 2) * this.constants.CELL_SIZE;
+                        this._createWall(worldX, worldZ); 
+                    }
+                }
+            }
+            this._createGoal((endX - size / 2) * this.constants.CELL_SIZE, (endZ - size / 2) * this.constants.CELL_SIZE);
+            const enemyCount = Math.floor(this.gameState.level * 1.5 + 2);
+            for (let i = 0; i < enemyCount; i++) {
+                let x, z;
+                do { x = Math.floor(Math.random() * (size - 4)) + 2; z = Math.floor(Math.random() * (size - 4)) + 2; } while (this.state.maze[z][x] !== 0 || (Math.abs(x - startX) < 3 && Math.abs(z - startZ) < 3));
+                const enemyType = Math.random() < 0.7 ? 'patrol' : 'chaser';
+                this._createEnemy((x - size / 2) * this.constants.CELL_SIZE, 1, (z - size / 2) * this.constants.CELL_SIZE, enemyType);
+            }
+            const powerUpCount = Math.floor(this.gameState.level * 0.8 + 1);
+            for (let i = 0; i < powerUpCount; i++) {
+                let x, z;
+                do { x = Math.floor(Math.random() * (size - 2)) + 1; z = Math.floor(Math.random() * (size - 2)) + 1; } while (this.state.maze[z][x] !== 0);
+                const powerUpTypes = ['speed', 'energy', 'shield', 'multiplier'];
+                const powerUpType = powerUpTypes[Math.floor(Math.random() * powerUpTypes.length)];
+                this._createPowerUp((x - size / 2) * this.constants.CELL_SIZE, 1.5, (z - size / 2) * this.constants.CELL_SIZE, powerUpType);
+            }
+            const collectibleCount = Math.floor(size * 1.2);
+            for (let i = 0; i < collectibleCount; i++) {
+                let x, z;
+                do { x = Math.floor(Math.random() * (size - 2)) + 1; z = Math.floor(Math.random() * (size - 2)) + 1; } while (this.state.maze[z][x] !== 0);
+                this._createCollectible((x - size / 2) * this.constants.CELL_SIZE, 1, (z - size / 2) * this.constants.CELL_SIZE, i);
+            }
+        }
+        
+        _createPlayer(x, y, z) {
+            const eid = ecs.addEntity(this.world);
+            const mesh = new THREE.Mesh(new THREE.SphereGeometry(this.constants.PLAYER_RADIUS, 32, 32), new THREE.MeshStandardMaterial({ color: this.colors.primary, emissive: this.colors.primary, emissiveIntensity: 0.4, metalness: 0.8 }));
+            mesh.castShadow = true;
+            mesh.add(new THREE.PointLight(this.colors.primary, 2, 15));
+            mesh.add(new THREE.Mesh(new THREE.SphereGeometry(0.8, 16, 16), new THREE.MeshBasicMaterial({ color: this.colors.primary, transparent: true, opacity: 0.1, side: THREE.DoubleSide })));
+            this.state.scene.add(mesh);
+            this.threeJSObjectMap.set(eid, mesh);
+            ecs.addComponent(this.world, this.Player, eid);
+            ecs.addComponent(this.world, this.Position, eid, { x, y, z });
+            ecs.addComponent(this.world, this.Velocity, eid, { x: 0, y: 0, z: 0 });
+            ecs.addComponent(this.world, this.ThreeJSObject, eid, { eid });
+            return eid;
+        }
+
+        _createWall(x, z) {
+            const eid = ecs.addEntity(this.world);
+            const mesh = new THREE.Mesh(new THREE.BoxGeometry(this.constants.CELL_SIZE, this.constants.WALL_HEIGHT, this.constants.CELL_SIZE), new THREE.MeshStandardMaterial({ color: this.colors.wall, roughness: 0.6 }));
+            mesh.castShadow = true;
+            mesh.position.set(x, this.constants.WALL_HEIGHT / 2, z);
+            this.state.scene.add(mesh);
+            this.threeJSObjectMap.set(eid, mesh);
+            ecs.addComponent(this.world, this.Wall, eid, { halfSize: this.constants.CELL_SIZE / 2 });
+            ecs.addComponent(this.world, this.Position, eid, { x, y: this.constants.WALL_HEIGHT / 2, z });
+        }
+
+        _createGoal(x, z) {
+            const eid = ecs.addEntity(this.world);
+            const mesh = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.8, 0.3, 16), new THREE.MeshStandardMaterial({ color: this.colors.success, emissive: this.colors.success, emissiveIntensity: 0.5 }));
+            const beam = new THREE.Mesh(new THREE.CylinderGeometry(0.1, 1.5, 8, 16, 1, true), new THREE.MeshBasicMaterial({ color: this.colors.success, transparent: true, opacity: 0.3, side: THREE.DoubleSide }));
+            beam.position.y = 4;
+            mesh.add(beam);
+            this.state.scene.add(mesh);
+            this.threeJSObjectMap.set(eid, mesh);
+            ecs.addComponent(this.world, this.Goal, eid);
+            ecs.addComponent(this.world, this.Position, eid, { x, y: 0.15, z });
+            ecs.addComponent(this.world, this.Animation, eid, { speed: 0.02, phase: 0 });
+            ecs.addComponent(this.world, this.ThreeJSObject, eid, { eid });
+        }
+
+        _createCollectible(x, y, z, phase) {
+            const eid = ecs.addEntity(this.world);
+            const mesh = new THREE.Mesh(new THREE.OctahedronGeometry(0.4), new THREE.MeshStandardMaterial({ color: this.colors.accent, emissive: this.colors.accent, emissiveIntensity: 0.4, metalness: 0.9 }));
+            this.state.scene.add(mesh);
+            this.threeJSObjectMap.set(eid, mesh);
+            ecs.addComponent(this.world, this.Collectible, eid);
+            ecs.addComponent(this.world, this.Position, eid, { x, y, z });
+            ecs.addComponent(this.world, this.Animation, eid, { speed: 0.002, phase });
+            ecs.addComponent(this.world, this.ThreeJSObject, eid, { eid });
+        }
+        
+        _createTrail() {
+            const eid = ecs.addEntity(this.world);
+            const mesh = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: this.colors.primary, transparent: true, opacity: 0.6 }));
+            mesh.points = [];
+            this.state.scene.add(mesh);
+            this.threeJSObjectMap.set(eid, mesh);
+            ecs.addComponent(this.world, this.Trail, eid);
+            ecs.addComponent(this.world, this.ThreeJSObject, eid, { eid });
+        }
+        
+        _spawnParticleFromPool(x, y, z, color, life, velocity) {
+            if (this.particlePool.length === 0) return;
+            const eid = this.particlePool.pop();
+            const particle = this.Particle.get(eid);
+            particle.active = true;
+            particle.life = life;
+            particle.maxLife = life;
+            const position = this.Position.get(eid);
+            position.x = x;
+            position.y = y;
+            position.z = z;
+            const vel = this.Velocity.get(eid);
+            vel.x = velocity.x;
+            vel.y = velocity.y;
+            vel.z = velocity.z;
+            const mesh = this.threeJSObjectMap.get(eid);
+            mesh.material.color.set(color);
+            mesh.material.opacity = 1;
+            mesh.visible = true;
+        }
+
+        _createParticlesBurst(x, y, z, color, count) {
+            for (let i = 0; i < count; i++) {
+                const velocity = {
+                    x: (Math.random() - 0.5) * 3,
+                    y: (Math.random() - 0.5) * 3,
+                    z: (Math.random() - 0.5) * 3
+                };
+                this._spawnParticleFromPool(x, y, z, color, 20 + Math.random() * 20, velocity);
+            }
+        }
+
+        _createEnemy(x, y, z, type) {
+            const eid = ecs.addEntity(this.world);
+            let mesh, color;
+            if (type === 'patrol') {
+                color = this.colors.warning;
+                mesh = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.3 }));
+            } else {
+                color = 0xff0066;
+                mesh = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.2, 6), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.4 }));
+            }
+            mesh.castShadow = true;
+            this.state.scene.add(mesh);
+            this.threeJSObjectMap.set(eid, mesh);
+            ecs.addComponent(this.world, this.Enemy, eid, { type, speed: type === 'chaser' ? 2 : 1.5 });
+            ecs.addComponent(this.world, this.Position, eid, { x, y, z });
+            ecs.addComponent(this.world, this.Velocity, eid, { x: 0, y: 0, z: 0 });
+            ecs.addComponent(this.world, this.AI, eid, { target: { x, y, z }, lastDirection: Math.random() * Math.PI * 2, timer: 0 });
+            ecs.addComponent(this.world, this.Animation, eid, { speed: 0.05, phase: Math.random() * Math.PI * 2 });
+            ecs.addComponent(this.world, this.ThreeJSObject, eid, { eid });
+        }
+
+        _createPowerUp(x, y, z, type) {
+            const eid = ecs.addEntity(this.world);
+            const colors = { speed: 0x00ffff, energy: 0xffff00, shield: 0x00ff00, multiplier: 0xff00ff };
+            const mesh = new THREE.Mesh(new THREE.TetrahedronGeometry(0.6), new THREE.MeshStandardMaterial({ color: colors[type], emissive: colors[type], emissiveIntensity: 0.5, transparent: true, opacity: 0.8 }));
+            this.state.scene.add(mesh);
+            this.threeJSObjectMap.set(eid, mesh);
+            ecs.addComponent(this.world, this.PowerUp, eid, { type });
+            ecs.addComponent(this.world, this.Position, eid, { x, y, z });
+            ecs.addComponent(this.world, this.Animation, eid, { speed: 0.01, phase: Math.random() * Math.PI * 2 });
+            ecs.addComponent(this.world, this.ThreeJSObject, eid, { eid });
+        }
+
+        _inputSystem(deltaTime) {
+            if (!ecs.entityExists(this.world, this.state.playerEid)) return;
+            const eid = this.state.playerEid;
+            const position = this.Position.get(eid);
+            const velocity = this.Velocity.get(eid);
+            
+            const { PLAYER_FORCE, JUMP_FORCE } = this.constants;
+            const speedBonus = ecs.hasComponent(this.world, this.SpeedBoost, this.state.playerEid) ? 1.5 : 1;
+            const boostMultiplier = this.activeActions.has('BOOST') && this.gameState.energy > 0 ? 2.5 : 1;
+            const finalMultiplier = boostMultiplier * speedBonus;
+            
+            let forceApplied = false;
+
+            if (this.activeActions.has('MOVE_FORWARD')) { velocity.z -= PLAYER_FORCE * finalMultiplier * deltaTime; forceApplied = true; }
+            if (this.activeActions.has('MOVE_BACK')) { velocity.z += PLAYER_FORCE * finalMultiplier * deltaTime; forceApplied = true; }
+            if (this.activeActions.has('MOVE_LEFT')) { velocity.x -= PLAYER_FORCE * finalMultiplier * deltaTime; forceApplied = true; }
+            if (this.activeActions.has('MOVE_RIGHT')) { velocity.x += PLAYER_FORCE * finalMultiplier * deltaTime; forceApplied = true; }
+            
+            if (forceApplied) {
+                this.state.moveTimer++;
+                if (this.state.moveTimer % 12 === 0) {
+                    this._playSound('move');
+                }
+                if (boostMultiplier > 1) {
+                    this.gameState.energy -= 0.5;
+                    if (!this.state.isBoosting) { this._playSound('boost'); this.state.isBoosting = true; }
+                } else {
+                    this.gameState.energy += 0.2;
+                    if (this.state.isBoosting) { this.state.isBoosting = false; }
+                }
+            } else {
+                if (this.state.isBoosting) { this.state.isBoosting = false; }
+            }
+
+            if (this.activeActions.has('JUMP') && this.gameState.energy >= this.constants.JUMP_COST && this.state.jumpReady) {
+                this.state.jumpReady = false;
+                setTimeout(() => { this.state.jumpReady = true; }, this.constants.JUMP_COOLDOWN);
+                this.gameState.energy -= this.constants.JUMP_COST;
+                this._playSound('jump');
+                this._triggerScreenShake(5);
+                
+                let jumpDirection = new THREE.Vector3(velocity.x, 0, velocity.z);
+                if (jumpDirection.lengthSq() < 0.001) jumpDirection.set(0, 0, -1);
+                jumpDirection.normalize();
+
+                velocity.x += jumpDirection.x * JUMP_FORCE;
+                velocity.z += jumpDirection.z * JUMP_FORCE;
+                
+                this._createParticlesBurst(position.x, position.y, position.z, this.colors.primary, 8);
+            }
+        }
+        
+        _movementSystem(deltaTime) {
+            const movingQuery = ecs.defineQuery([this.Position, this.Velocity]);
+            const entities = movingQuery(this.world);
+            
+            const friction = Math.pow(this.constants.FRICTION, deltaTime * 60);
+
+            for (const eid of entities) {
+                const position = this.Position.get(eid);
+                const velocity = this.Velocity.get(eid);
+                
+                if (!ecs.hasComponent(this.world, this.Particle, eid)) {
+                    velocity.x *= friction;
+                    velocity.z *= friction;
+                }
+                
+                position.x += velocity.x * deltaTime;
+                position.y += velocity.y * deltaTime;
+                position.z += velocity.z * deltaTime;
+            }
+        }
+        
+        // MODIFIED: Entirely new collision response logic
+        _collisionSystem(deltaTime) {
+            const playerQuery = ecs.defineQuery([this.Player, this.Position, this.Velocity]);
+            const collectibleQuery = ecs.defineQuery([this.Collectible, this.Position]);
+            const goalQuery = ecs.defineQuery([this.Goal, this.Position]);
+            const enemyQuery = ecs.defineQuery([this.Enemy, this.Position]);
+            const powerUpQuery = ecs.defineQuery([this.PowerUp, this.Position]);
+            
+            const players = playerQuery(this.world);
+            if(players.size === 0) return;
+            const p_eid = players.values().next().value;
+            const playerPos = this.Position.get(p_eid);
+            const playerVel = this.Velocity.get(p_eid);
+
+            const { CELL_SIZE, PLAYER_RADIUS, WALL_RESTITUTION } = this.constants;
+            const size = this.state.currentMazeSize;
+            const halfSize = size / 2;
+            const w_half = CELL_SIZE / 2;
+
+            const gridX = Math.floor((playerPos.x / CELL_SIZE) + halfSize);
+            const gridZ = Math.floor((playerPos.z / CELL_SIZE) + halfSize);
+            
+            for (let z = gridZ - 1; z <= gridZ + 1; z++) {
+                for (let x = gridX - 1; x <= gridX + 1; x++) {
+                    if (this.state.maze[z] && this.state.maze[z][x] === 1) {
+                        const wallWorldX = (x - halfSize) * CELL_SIZE;
+                        const wallWorldZ = (z - halfSize) * CELL_SIZE;
+                        
+                        // AABB collision check
+                        const closestX = Math.max(wallWorldX - w_half, Math.min(playerPos.x, wallWorldX + w_half));
+                        const closestZ = Math.max(wallWorldZ - w_half, Math.min(playerPos.z, wallWorldZ + w_half));
+                        
+                        const dist_x = playerPos.x - closestX;
+                        const dist_z = playerPos.z - closestZ;
+                        const distanceSq = (dist_x * dist_x) + (dist_z * dist_z);
+
+                        if (distanceSq < (PLAYER_RADIUS * PLAYER_RADIUS)) {
+                            // Collision detected, find the normal
+                            const normal = new THREE.Vector2(dist_x, dist_z).normalize();
+                            
+                            // Move player out of the wall to prevent sticking
+                            const penetrationDepth = PLAYER_RADIUS - Math.sqrt(distanceSq);
+                            playerPos.x += normal.x * penetrationDepth;
+                            playerPos.z += normal.y * penetrationDepth;
+
+                            // Calculate the velocity component along the normal
+                            const dot = playerVel.x * normal.x + playerVel.z * normal.y;
+                            
+                            // Calculate the impulse for bouncing (restitution)
+                            const impulseX = (1 + WALL_RESTITUTION) * dot * normal.x;
+                            const impulseZ = (1 + WALL_RESTITUTION) * dot * normal.y;
+                            
+                            // Apply the bounce
+                            playerVel.x -= impulseX;
+                            playerVel.z -= impulseZ;
+
+                            // If skidding, create sparks
+                            const speed = Math.hypot(playerVel.x, playerVel.z);
+                            if (speed > 2.0) {
+                                this._createParticlesBurst(closestX, playerPos.y, closestZ, this.colors.sparks, 1);
+                                if(Math.random() > 0.8) this._playSound('scrape');
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // --- Other collision checks remain the same ---
+            for (const c_eid of [...collectibleQuery(this.world)]) {
+                const collectiblePos = this.Position.get(c_eid);
+                const dist = Math.hypot(playerPos.x - collectiblePos.x, playerPos.z - collectiblePos.z);
+                if(dist < 1.0) {
+                    const multiplierComp = ecs.hasComponent(this.world, this.ScoreMultiplierEffect, p_eid) ? this.ScoreMultiplierEffect.get(p_eid).value : 1;
+                    const scoreToAdd = 25 * this.gameState.level;
+                    this.gameState.addScore(scoreToAdd, multiplierComp);
+                    this._queueScoreEffect(scoreToAdd * multiplierComp);
+
+                    this.gameState.energy += 10;
+                    this._playSound('collect');
+                    this._createParticlesBurst(collectiblePos.x, collectiblePos.y, collectiblePos.z, this.colors.accent, 5);
+                    const mesh = this.threeJSObjectMap.get(c_eid);
+                    if (mesh) this.state.scene.remove(mesh);
+                    this.threeJSObjectMap.delete(c_eid);
+                    ecs.removeEntity(this.world, c_eid);
+                }
+            }
+            
+            for (const pu_eid of [...powerUpQuery(this.world)]) {
+                const powerUpPos = this.Position.get(pu_eid);
+                const powerUpData = this.PowerUp.get(pu_eid);
+                const dist = Math.hypot(playerPos.x - powerUpPos.x, playerPos.z - powerUpPos.z);
+                if(dist < 1.2) {
+                    const timer_eid = ecs.addEntity(this.world);
+                    let duration = 10000;
+                    let effectComponent = null;
+                    
+                    switch(powerUpData.type) {
+                        case 'speed':
+                            effectComponent = this.SpeedBoost;
+                            ecs.addComponent(this.world, effectComponent, p_eid);
+                            break;
+                        case 'shield':
+                            duration = 8000;
+                            effectComponent = this.InvulnerabilityShield;
+                            ecs.addComponent(this.world, effectComponent, p_eid);
+                            break;
+                        case 'multiplier':
+                            duration = 15000;
+                            effectComponent = this.ScoreMultiplierEffect;
+                            ecs.addComponent(this.world, effectComponent, p_eid, { value: 3 });
+                            break;
+                        case 'energy':
+                            this.gameState.energy = 100;
+                            break;
+                    }
+
+                    if (effectComponent) {
+                         ecs.addComponent(this.world, this.EffectTimer, timer_eid, { target: p_eid, component: effectComponent, expiration: Date.now() + duration });
+                    } else {
+                        ecs.removeEntity(this.world, timer_eid);
+                    }
+
+                    this._playSound('powerUp');
+                    this._triggerScreenShake(8);
+                    this._createParticlesBurst(powerUpPos.x, powerUpPos.y, powerUpPos.z, 0xffffff, 12);
+                    const mesh = this.threeJSObjectMap.get(pu_eid);
+                    if (mesh) this.state.scene.remove(mesh);
+                    this.threeJSObjectMap.delete(pu_eid);
+                    ecs.removeEntity(this.world, pu_eid);
+                }
+            }
+            
+            if (!ecs.hasComponent(this.world, this.InvulnerabilityShield, p_eid)) {
+                const enemies = enemyQuery(this.world);
+                for (const e_eid of enemies) {
+                    const enemyPos = this.Position.get(e_eid);
+                    const dist = Math.hypot(playerPos.x - enemyPos.x, playerPos.z - enemyPos.z);
+                    if(dist < 1.0) {
+                        this.gameState.health -= 20;
+                        this._playSound('damage');
+                        this._triggerScreenShake(15);
+                        this._createParticlesBurst(playerPos.x, playerPos.y, playerPos.z, 0xff0000, 8);
+                        if (this.gameState.health <= 0) { this.state.gameState = 'gameOver'; }
+                        
+                        ecs.addComponent(this.world, this.InvulnerabilityShield, p_eid);
+                        const timer_eid = ecs.addEntity(this.world);
+                        ecs.addComponent(this.world, this.EffectTimer, timer_eid, { target: p_eid, component: this.InvulnerabilityShield, expiration: Date.now() + 2000 });
+                    }
+                }
+            }
+            
+            const goals = goalQuery(this.world);
+            if(goals.size > 0 && this.state.gameState === 'playing') {
+                const g_eid = goals.values().next().value;
+                const goalPos = this.Position.get(g_eid);
+                const dist = Math.hypot(playerPos.x - goalPos.x, playerPos.z - goalPos.z);
+                if(dist < 2.0) {
+                    this.state.gameState = 'transitioning';
+                    
+                    const multiplierComp = ecs.hasComponent(this.world, this.ScoreMultiplierEffect, p_eid) ? this.ScoreMultiplierEffect.get(p_eid).value : 1;
+                    const scoreToAdd = 200 * this.gameState.level;
+                    this.gameState.addScore(scoreToAdd, multiplierComp);
+                    this._queueScoreEffect(scoreToAdd * multiplierComp);
+
+                    this.gameState.level++;
+                    this.gameState.health += 25;
+                    
+                    this._playSound('levelUp');
+                    this._triggerScreenShake(12);
+                    setTimeout(() => this._createLevel(), 2000);
+                }
+            }
+        }
+
+        _effectsSystem() {
+            const timerQuery = ecs.defineQuery([this.EffectTimer]);
+            const timers = timerQuery(this.world);
+            const now = Date.now();
+
+            for (const eid of [...timers]) {
+                const timer = this.EffectTimer.get(eid);
+                if (now > timer.expiration) {
+                    if (ecs.entityExists(this.world, timer.target)) {
+                       ecs.removeComponent(this.world, timer.component, timer.target);
+                    }
+                    ecs.removeEntity(this.world, eid);
+                }
+            }
+        }
+
+        _particleSystem() {
+            const particleQuery = ecs.defineQuery([this.Particle]);
+            const entities = particleQuery(this.world);
+            
+            for(const eid of entities) {
+                const particle = this.Particle.get(eid);
+                
+                if (!particle.active) continue;
+
+                particle.life--;
+                
+                if(particle.life <= 0) {
+                    particle.active = false;
+                    const mesh = this.threeJSObjectMap.get(eid);
+                    if (mesh) mesh.visible = false;
+                    this.particlePool.push(eid);
+                    continue;
+                }
+                
+                const velocity = this.Velocity.get(eid);
+                if (velocity) {
+                    velocity.y -= 0.008; // Stronger gravity for particles
+                }
+                
+                const mesh = this.threeJSObjectMap.get(eid);
+                if (mesh) {
+                    mesh.material.opacity = particle.life / particle.maxLife;
+                }
+            }
+        }
+
+        _aiSystem(deltaTime) {
+            if (!ecs.entityExists(this.world, this.state.playerEid)) return;
+            const enemyQuery = ecs.defineQuery([this.Enemy, this.Position, this.Velocity, this.AI]);
+            const enemies = enemyQuery(this.world);
+            const playerPos = this.Position.get(this.state.playerEid);
+            for (const eid of enemies) {
+                const enemy = this.Enemy.get(eid);
+                const position = this.Position.get(eid);
+                const velocity = this.Velocity.get(eid);
+                const ai = this.AI.get(eid);
+                ai.timer++;
+                const distToPlayer = Math.hypot(playerPos.x - position.x, playerPos.z - position.z);
+                if (distToPlayer < 5 && ai.timer % 60 === 0 && enemy.type === 'chaser') { this._playSound('enemyAlert'); }
+                if (enemy.type === 'patrol') {
+                    if (ai.timer % 120 === 0) { ai.lastDirection = Math.random() * Math.PI * 2; }
+                    velocity.x = Math.cos(ai.lastDirection) * enemy.speed;
+                    velocity.z = Math.sin(ai.lastDirection) * enemy.speed;
+                } else if (enemy.type === 'chaser') {
+                    const dx = playerPos.x - position.x;
+                    const dz = playerPos.z - position.z;
+                    const distance = Math.hypot(dx, dz);
+                    if (distance > 0.1) {
+                        const chaseSpeed = enemy.speed * (1 + Math.sin(ai.timer * 0.1) * 0.2);
+                        velocity.x = (dx / distance) * chaseSpeed;
+                        velocity.z = (dz / distance) * chaseSpeed;
+                    }
+                }
+                const nextX = position.x + velocity.x * 15 * deltaTime;
+                const nextZ = position.z + velocity.z * 15 * deltaTime;
+                const size = this.state.currentMazeSize;
+                const cellSize = this.constants.CELL_SIZE;
+                const mazeX = Math.floor((nextX / cellSize) + size / 2);
+                const mazeZ = Math.floor((nextZ / cellSize) + size / 2);
+                if (mazeX < 0 || mazeX >= size || mazeZ < 0 || mazeZ >= size || (this.state.maze[mazeZ] && this.state.maze[mazeZ][mazeX] === 1)) {
+                    if (enemy.type === 'patrol') { ai.lastDirection += (Math.PI / 2) + (Math.random() - 0.5) * Math.PI / 4; } 
+                    else { const perpendicular = ai.lastDirection + Math.PI / 2; velocity.x = Math.cos(perpendicular) * enemy.speed; velocity.z = Math.sin(perpendicular) * enemy.speed; ai.lastDirection = perpendicular; }
+                }
+            }
+        }
+        
+        _trailSystem() {
+            const trailQuery = ecs.defineQuery([this.Trail, this.ThreeJSObject]);
+            const entities = trailQuery(this.world);
+            if (!ecs.entityExists(this.world, this.state.playerEid)) return;
+            const playerPos = this.Position.get(this.state.playerEid);
+            for(const eid of entities) {
+                const trailObj = this.threeJSObjectMap.get(eid);
+                trailObj.points.push(new THREE.Vector3(playerPos.x, playerPos.y, playerPos.z));
+                while(trailObj.points.length > 60) trailObj.points.shift();
+                if(trailObj.points.length > 1) trailObj.geometry.setFromPoints(trailObj.points);
+            }
+        }
+        
+        _animationSystem() {
+            const animatedQuery = ecs.defineQuery([this.Position, this.Animation, this.ThreeJSObject]);
+            const entities = animatedQuery(this.world);
+            const now = Date.now();
+            for(const eid of entities) {
+                const position = this.Position.get(eid);
+                const animation = this.Animation.get(eid);
+                const mesh = this.threeJSObjectMap.get(eid);
+                if(ecs.hasComponent(this.world, this.Collectible, eid)) {
+                    mesh.rotation.y += 0.03;
+                    position.y = 1 + Math.sin(now * animation.speed + animation.phase) * 0.3;
+                }
+                if(ecs.hasComponent(this.world, this.Goal, eid)) {
+                    mesh.children[0].rotation.y += animation.speed;
+                    mesh.children[0].material.opacity = 0.3 + Math.sin(now * 0.003) * 0.2;
+                }
+                if(ecs.hasComponent(this.world, this.Enemy, eid)) {
+                    mesh.rotation.y += animation.speed;
+                    const bobOffset = Math.sin(now * animation.speed * 2 + animation.phase) * 0.1;
+                    position.y = 1 + bobOffset;
+                }
+                if(ecs.hasComponent(this.world, this.PowerUp, eid)) {
+                    mesh.rotation.x += animation.speed;
+                    mesh.rotation.y += animation.speed * 0.7;
+                    mesh.rotation.z += animation.speed * 0.3;
+                    position.y = 1.5 + Math.sin(now * animation.speed + animation.phase) * 0.4;
+                }
+            }
+        }
+
+        // MODIFIED: Added realistic rolling simulation
+        _renderSystem(deltaTime) {
+            const renderQuery = ecs.defineQuery([this.Position, this.ThreeJSObject]);
+            const entities = renderQuery(this.world);
+            for(const eid of entities) {
+                const position = this.Position.get(eid);
+                const mesh = this.threeJSObjectMap.get(eid);
+                if(mesh && !ecs.hasComponent(this.world, this.Trail, eid)) {
+                    mesh.position.set(position.x, position.y, position.z);
+                    if(ecs.hasComponent(this.world, this.Player, eid)) {
+                        const velocity = this.Velocity.get(eid);
+                        // This simulates the sphere's rolling based on its velocity
+                        const rotationAxis = new THREE.Vector3(velocity.z, 0, -velocity.x).normalize();
+                        const angularSpeed = Math.hypot(velocity.x, velocity.z) / this.constants.PLAYER_RADIUS;
+                        const quaternion = new THREE.Quaternion();
+                        quaternion.setFromAxisAngle(rotationAxis, angularSpeed * deltaTime);
+                        mesh.quaternion.premultiply(quaternion);
+                    }
+                }
+            }
+        }
+        
+        _cameraSystem() {
+            if (!ecs.entityExists(this.world, this.state.playerEid)) return;
+            const playerPos = this.Position.get(this.state.playerEid);
+            const targetPosition = new THREE.Vector3();
+            const lookAtPosition = new THREE.Vector3(playerPos.x, playerPos.y, playerPos.z);
+            if (this.state.cameraMode === 'third') {
+                const heightOffset = Math.max(12, this.state.currentMazeSize * 0.4);
+                const distanceOffset = Math.max(10, this.state.currentMazeSize * 0.3);
+                targetPosition.set(lookAtPosition.x, lookAtPosition.y + heightOffset, lookAtPosition.z + distanceOffset);
+            } else {
+                const heightOffset = Math.max(30, this.state.currentMazeSize * 0.8);
+                targetPosition.set(lookAtPosition.x, lookAtPosition.y + heightOffset, lookAtPosition.z);
+            }
+            if (this.state.screenShake > 0) {
+                const shakeX = (Math.random() - 0.5) * this.state.screenShake * 0.1;
+                const shakeY = (Math.random() - 0.5) * this.state.screenShake * 0.1;
+                const shakeZ = (Math.random() - 0.5) * this.state.screenShake * 0.1;
+                targetPosition.x += shakeX;
+                targetPosition.y += shakeY;
+                targetPosition.z += shakeZ;
+                this.state.screenShake *= 0.9;
+                if (this.state.screenShake < 0.1) this.state.screenShake = 0;
+            }
+            this.state.camera.position.lerp(targetPosition, 0.05);
+            this.state.camera.lookAt(lookAtPosition);
+        }
+
+        _uiSystem() {
+            if (this.uiElements.score && ecs.entityExists(this.world, this.state.playerEid)) {
+                const playerPos = this.Position.get(this.state.playerEid);
+                this.uiElements.time.textContent = Math.floor((Date.now() - this.state.startTime) / 1000) + 's';
+                this.uiElements.position.textContent = `(${playerPos.x.toFixed(1)}, ${playerPos.z.toFixed(1)})`;
+                const jumpColor = this.state.jumpReady ? '#00f4ff' : '#ff6b00';
+                this.uiElements.jumpStatus.innerHTML = `<strong>JUMP:</strong> <span style="color: ${jumpColor};">${this.state.jumpReady ? 'READY' : 'RECHARGING'}</span>`;
+                
+                let powerUpText = '';
+                if(ecs.hasComponent(this.world, this.InvulnerabilityShield, this.state.playerEid)) powerUpText += '🛡️ SHIELD ';
+                if(ecs.hasComponent(this.world, this.ScoreMultiplierEffect, this.state.playerEid)) powerUpText += '✨ MULTIPLIER ';
+                if(ecs.hasComponent(this.world, this.SpeedBoost, this.state.playerEid)) powerUpText += '🚀 SPEED ';
+
+                if (powerUpText) { 
+                    this.uiElements.jumpStatus.innerHTML += `<br><span style="color: #ff00ff; font-size: 10px;">${powerUpText}</span>`; 
+                }
+            }
+        }
+        
+        _minimapSystem() {
+            if (!this.state.minimapCtx || !ecs.entityExists(this.world, this.state.playerEid)) return;
+            const ctx = this.state.minimapCtx;
+            const canvas = this.state.minimapCanvas;
+            const size = this.state.currentMazeSize;
+            const scale = Math.min(canvas.width, canvas.height) / size;
+            ctx.fillStyle = '#0a1a2a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            for (let y = 0; y < size; y++) {
+                for (let x = 0; x < size; x++) {
+                    const pixelX = x * scale; const pixelY = y * scale;
+                    if (this.state.maze[y][x] === 1) { ctx.fillStyle = '#2a4858'; ctx.fillRect(pixelX, pixelY, scale, scale); } 
+                    else { ctx.fillStyle = '#1a2332'; ctx.fillRect(pixelX, pixelY, scale, scale); }
+                }
+            }
+            const collectibleQuery = ecs.defineQuery([this.Collectible, this.Position]);
+            const collectibles = collectibleQuery(this.world);
+            ctx.fillStyle = '#8000ff';
+            for (const c_eid of collectibles) {
+                const pos = this.Position.get(c_eid);
+                const mazeX = Math.floor((pos.x / this.constants.CELL_SIZE) + size / 2);
+                const mazeY = Math.floor((pos.z / this.constants.CELL_SIZE) + size / 2);
+                ctx.fillRect(mazeX * scale + scale * 0.25, mazeY * scale + scale * 0.25, scale * 0.5, scale * 0.5);
+            }
+            const powerUpQuery = ecs.defineQuery([this.PowerUp, this.Position]);
+            const powerUps = powerUpQuery(this.world);
+            ctx.fillStyle = '#ffff00';
+            for (const pu_eid of powerUps) {
+                const pos = this.Position.get(pu_eid);
+                const mazeX = Math.floor((pos.x / this.constants.CELL_SIZE) + size / 2);
+                const mazeY = Math.floor((pos.z / this.constants.CELL_SIZE) + size / 2);
+                ctx.fillRect(mazeX * scale + scale * 0.2, mazeY * scale + scale * 0.2, scale * 0.6, scale * 0.6);
+            }
+            const enemyQuery = ecs.defineQuery([this.Enemy, this.Position]);
+            const enemies = enemyQuery(this.world);
+            ctx.fillStyle = '#ff4444';
+            for (const e_eid of enemies) {
+                const pos = this.Position.get(e_eid);
+                const mazeX = Math.floor((pos.x / this.constants.CELL_SIZE) + size / 2);
+                const mazeY = Math.floor((pos.z / this.constants.CELL_SIZE) + size / 2);
+                ctx.beginPath();
+                ctx.arc(mazeX * scale + scale * 0.5, mazeY * scale + scale * 0.5, scale * 0.25, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            const goalQuery = ecs.defineQuery([this.Goal, this.Position]);
+            const goals = goalQuery(this.world);
+            if (goals.size > 0) {
+                ctx.fillStyle = '#00ff80';
+                const pos = this.Position.get(goals.values().next().value);
+                const mazeX = Math.floor((pos.x / this.constants.CELL_SIZE) + size / 2);
+                const mazeY = Math.floor((pos.z / this.constants.CELL_SIZE) + size / 2);
+                ctx.fillRect(mazeX * scale + scale * 0.1, mazeY * scale + scale * 0.1, scale * 0.8, scale * 0.8);
+            }
+            const playerPos = this.Position.get(this.state.playerEid);
+            const playerMazeX = Math.floor((playerPos.x / this.constants.CELL_SIZE) + size / 2);
+            const playerMazeY = Math.floor((playerPos.z / this.constants.CELL_SIZE) + size / 2);
+            const playerColor = ecs.hasComponent(this.world, this.InvulnerabilityShield, this.state.playerEid) ? '#00ff00' : '#00f4ff';
+            ctx.fillStyle = playerColor;
+            ctx.beginPath();
+            ctx.arc(playerMazeX * scale + scale * 0.5, playerMazeY * scale + scale * 0.5, scale * 0.3, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowColor = playerColor;
+            ctx.shadowBlur = 8;
+            ctx.beginPath();
+            ctx.arc(playerMazeX * scale + scale * 0.5, playerMazeY * scale + scale * 0.5, scale * 0.2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+        
+        _animate(currentTime) {
+            if (this.state.lastTime === 0) this.state.lastTime = currentTime;
+            const deltaTime = (currentTime - this.state.lastTime) / 1000.0;
+            this.state.lastTime = currentTime;
+
+            if(this.state.gameState === 'playing') {
+                this._inputSystem(deltaTime);
+                this._movementSystem(deltaTime);
+                this._collisionSystem(deltaTime);
+                this._aiSystem(deltaTime);
+                this._effectsSystem();
+            }
+            this._particleSystem();
+            this._trailSystem();
+            this._animationSystem();
+            this._cameraSystem();
+            this._renderSystem(deltaTime);
+            this._uiSystem(); 
+            this._minimapSystem();
+            this.state.renderer.render(this.state.scene, this.state.camera);
+            requestAnimationFrame(this._animate.bind(this));
+        }
     }
     
-    return { grid, start: {r: 0, c: 0}, end: {r: rows - 1, c: cols - 1} };
-  }
-
-  /***** ──────────────────────────────────────────────────
-   * CAMERA & MINIMAP SYSTEMS
-   * ────────────────────────────────────────────────── */
-  
-  const CameraMode = {THIRD_PERSON:"third_person",FIRST_PERSON:"first_person"};
-  class CameraSystem {
-    constructor(camera) { this.camera = camera; this.mode = CameraMode.THIRD_PERSON; this.targetEntity = null; this.offset = new THREE.Vector3(0, 4, 6); this.firstPersonOffset = new THREE.Vector3(0, 0.5, 0); this.smoothness = 0.1; }
-    setTarget(entityId) { this.targetEntity = entityId; }
-    toggleMode() { this.mode = this.mode === CameraMode.THIRD_PERSON ? CameraMode.FIRST_PERSON : CameraMode.THIRD_PERSON; document.getElementById("camera-info").textContent = this.mode === CameraMode.THIRD_PERSON ? "Third Person" : "First Person"; }
-    update(world) { if (!this.targetEntity) return; const transform = world.getComponent(this.targetEntity, ComponentTypes.TRANSFORM); if (!transform) return; const targetPos = new THREE.Vector3(transform.x, transform.y, transform.z); if (this.mode === CameraMode.THIRD_PERSON) { const cameraPos = targetPos.clone().add(this.offset); this.camera.position.lerp(cameraPos, this.smoothness); this.camera.lookAt(targetPos); } else { const firstPersonPos = targetPos.clone().add(this.firstPersonOffset); this.camera.position.lerp(firstPersonPos, this.smoothness * 2); const velocity = world.getComponent(this.targetEntity, ComponentTypes.VELOCITY); if (velocity && (Math.abs(velocity.vx) > 0.1 || Math.abs(velocity.vz) > 0.1)) { const lookDirection = new THREE.Vector3(velocity.vx, 0, velocity.vz).normalize(); this.camera.lookAt(targetPos.clone().add(lookDirection)); } else { this.camera.lookAt(targetPos.x, targetPos.y, targetPos.z - 1); } } }
-  }
-  
-  class MinimapSystem {
-    constructor(canvasId, maze, cols, rows) { this.canvas = document.getElementById(canvasId); this.ctx = this.canvas.getContext("2d"); this.maze = maze; this.cols = cols; this.rows = rows; this.cellSize = this.canvas.width / Math.max(cols, rows); this.exploredCells = new Set(); this.visible = true; this.playerEntity = null; this.goalPos = null; }
-    setPlayer(entityId) { this.playerEntity = entityId; }
-    setGoal(goalPos) { this.goalPos = goalPos; }
-    toggle() { this.visible = !this.visible; document.getElementById("minimap-container").style.display = this.visible ? "block" : "none"; }
-    markExplored(row, col, radius = 1) { for (let r = Math.max(0, row - radius); r <= Math.min(this.rows - 1, row + radius); r++) { for (let c = Math.max(0, col - radius); c <= Math.min(this.cols - 1, col + radius); c++) { this.exploredCells.add(`${r},${c}`); } } }
-    update(world) { if (!this.visible || !this.playerEntity) return; const transform = world.getComponent(this.playerEntity, ComponentTypes.TRANSFORM); if (transform) { const playerRow = Math.floor((transform.z + this.rows * CELL_SIZE / 2) / CELL_SIZE); const playerCol = Math.floor((transform.x + this.cols * CELL_SIZE / 2) / CELL_SIZE); this.markExplored(playerRow, playerCol, 1); this.render(playerRow, playerCol); } }
-    render(playerRow, playerCol) { this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height); for (let r = 0; r < this.rows; r++) { for (let c = 0; c < this.cols; c++) { const x = c * this.cellSize; const y = r * this.cellSize; const cell = this.maze.grid[r][c]; if (this.exploredCells.has(`${r},${c}`)) { this.ctx.fillStyle = cell.zone === 'ice' ? "#66aaff" : "#333"; this.ctx.fillRect(x, y, this.cellSize, this.cellSize); this.ctx.strokeStyle = cell.zone === 'ice' ? "#99ccff" : "#666"; this.ctx.lineWidth = 2; this.ctx.beginPath(); if (cell.walls[0]) { this.ctx.moveTo(x, y); this.ctx.lineTo(x + this.cellSize, y); } if (cell.walls[1]) { this.ctx.moveTo(x + this.cellSize, y); this.ctx.lineTo(x + this.cellSize, y + this.cellSize); } if (cell.walls[2]) { this.ctx.moveTo(x + this.cellSize, y + this.cellSize); this.ctx.lineTo(x, y + this.cellSize); } if (cell.walls[3]) { this.ctx.moveTo(x, y + this.cellSize); this.ctx.lineTo(x, y); } this.ctx.stroke(); } else { this.ctx.fillStyle = "#111"; this.ctx.fillRect(x, y, this.cellSize, this.cellSize); } } } if (this.goalPos && this.exploredCells.has(`${this.goalPos.r},${this.goalPos.c}`)) { const goalX = this.goalPos.c * this.cellSize + this.cellSize / 2; const goalY = this.goalPos.r * this.cellSize + this.cellSize / 2; this.ctx.fillStyle = "#00ff00"; this.ctx.beginPath(); this.ctx.arc(goalX, goalY, this.cellSize / 3, 0, Math.PI * 2); this.ctx.fill(); } if (playerRow >= 0 && playerRow < this.rows && playerCol >= 0 && playerCol < this.cols) { const playerX = playerCol * this.cellSize + this.cellSize / 2; const playerY = playerRow * this.cellSize + this.cellSize / 2; this.ctx.fillStyle = "#ffff00"; this.ctx.beginPath(); this.ctx.arc(playerX, playerY, this.cellSize / 4, 0, Math.PI * 2); this.ctx.fill(); } }
-  }
-
-  /***** ──────────────────────────────────────────────────
-   * AUDIO SYSTEM
-   * ────────────────────────────────────────────────── */
-
-  class AudioSystem {
-    constructor(){ this.isMusicMuted=!1; this.isSfxMuted=!1; this.sounds={ music:new Howl({src:["https://goldfirestudios.com/proj/howlerjs/sound.mp3"],loop:!0,volume:.3}), sfx:new Howl({src:["https://goldfirestudios.com/proj/howlerjs/sounds.mp3"], sprite:{collision:[893,764],goal:[2049,1152],collect:[3500,450],powerup:[0,800],ice_enter:[4500, 500]}}) }; this.musicStarted=!1 }
-    startMusic(){ if(!this.musicStarted&&!this.isMusicMuted){this.sounds.music.play();this.musicStarted=!0} }
-    playSound(e){ this.isSfxMuted||this.sounds.sfx.play(e) }
-    toggleMusic(){ this.isMusicMuted=!this.isMusicMuted; this.sounds.music.mute(this.isMusicMuted); document.getElementById("toggle-music").classList.toggle("muted",this.isMusicMuted) }
-    toggleSfx(){ this.isSfxMuted=!this.isSfxMuted; document.getElementById("toggle-sfx").classList.toggle("muted",this.isSfxMuted) }
-  }
-
-  /***** ──────────────────────────────────────────────────
-   * SCENE SETUP & GAME STATE
-   * ────────────────────────────────────────────────── */
-  
-  const scene = new THREE.Scene();
-  scene.fog = new THREE.FogExp2(0x000000, 0.05);
-  const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
-  const renderer = new THREE.WebGLRenderer({ antialias: true });
-  renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
-  document.body.appendChild(renderer.domElement);
-  
-  scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-  directionalLight.position.set(10, 20, 10);
-  directionalLight.castShadow = true;
-  directionalLight.shadow.mapSize.width = 2048;
-  directionalLight.shadow.mapSize.height = 2048;
-  scene.add(directionalLight);
-  
-  const textureLoader = new THREE.TextureLoader();
-  let world, cameraSystem, minimapSystem, audioSystem;
-  let COLS = 20, ROWS = 20, CELL_SIZE = 2;
-  let maze, walls = [];
-  let playerEntity, goalEntity;
-  let gameCompleted = false;
-  let physicsDebugEnabled = false;
-  let lastCollisionTime = 0;
-  let score = 0;
-  let gameTime = 0;
-  let levelStartTime = 0;
-  let activePowerUpTimer = null;
-
-  function initializeGame() {
-    world = new ECSWorld();
-    maze = generateSolvableMaze(COLS, ROWS);
-    cameraSystem = new CameraSystem(camera);
-    minimapSystem = new MinimapSystem('minimap', maze, COLS, ROWS);
-    minimapSystem.setGoal(maze.end);
-    if (!audioSystem) { audioSystem = new AudioSystem(); }
-    
-    // Clear scene more safely
-    while(scene.children.length > 0){ 
-        const child = scene.children[0];
-        if(child.isMesh || child.isGroup) {
-            scene.remove(child);
-            if(child.geometry) child.geometry.dispose();
-            if(child.material) child.material.dispose();
+    window.addEventListener('load', () => {
+        if (typeof THREE !== 'undefined' && typeof Tone !== 'undefined') {
+            new NexusMazeGame();
         } else {
-            scene.remove(child);
+            console.error('Three.js or Tone.js failed to load');
         }
-    }
-    // Re-add lights after clearing
-    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-    scene.add(directionalLight);
-    
-    buildMazeGeometry();
-    createPlayer();
-    createGoal();
-    createCollectibles(10);
-    createPowerUps(2);
-    
-    cameraSystem.setTarget(playerEntity);
-    minimapSystem.setPlayer(playerEntity);
-    if (world.systems.length === 0) { setupSystems(); }
-    
-    gameCompleted = false;
-    score = 0;
-    levelStartTime = performance.now();
-    document.getElementById('goal-indicator').style.opacity = '0';
-    document.getElementById('score').textContent = score;
-  }
-
-  function buildMazeGeometry() {
-    walls = [];
-    const floorMaterial = new THREE.MeshStandardMaterial({ color: 0x4a4a4a, roughness: 0.8 });
-    const wallMaterial = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.9 });
-    const iceFloorMaterial = new THREE.MeshPhongMaterial({ color: 0x88ccff, transparent: true, opacity: 0.5, reflectivity: 0.8 });
-    const iceWallMaterial = new THREE.MeshStandardMaterial({ color: 0xadd8e6, roughness: 0.1, metalness: 0.1 });
-
-    const floor = new THREE.Mesh(new THREE.PlaneGeometry(COLS * CELL_SIZE, ROWS * CELL_SIZE), floorMaterial);
-    floor.rotation.x = -Math.PI / 2;
-    floor.receiveShadow = true;
-    scene.add(floor);
-
-    const wallGeometry = new THREE.BoxGeometry(CELL_SIZE, 1.5, 0.2);
-
-    for (let r = 0; r < ROWS; r++) {
-      for (let c = 0; c < COLS; c++) {
-        const cell = maze.grid[r][c];
-        const x = (c - COLS / 2 + 0.5) * CELL_SIZE;
-        const z = (r - ROWS / 2 + 0.5) * CELL_SIZE;
-
-        const currentWallMaterial = cell.zone === 'ice' ? iceWallMaterial : wallMaterial;
-
-        if (cell.walls[0]) { const wall = new THREE.Mesh(wallGeometry, currentWallMaterial); wall.position.set(x, 0.75, z - CELL_SIZE / 2); wall.castShadow = true; scene.add(wall); walls.push({ x, z: z - CELL_SIZE / 2, horizontal: true }); }
-        if (cell.walls[3]) { const wall = new THREE.Mesh(wallGeometry, currentWallMaterial); wall.rotation.y = Math.PI / 2; wall.position.set(x - CELL_SIZE / 2, 0.75, z); wall.castShadow = true; scene.add(wall); walls.push({ x: x - CELL_SIZE / 2, z, horizontal: false }); }
-        if (r === ROWS - 1 && cell.walls[2]) { const wall = new THREE.Mesh(wallGeometry, currentWallMaterial); wall.position.set(x, 0.75, z + CELL_SIZE / 2); wall.castShadow = true; scene.add(wall); walls.push({ x, z: z + CELL_SIZE / 2, horizontal: true }); }
-        if (c === COLS - 1 && cell.walls[1]) { const wall = new THREE.Mesh(wallGeometry, currentWallMaterial); wall.rotation.y = Math.PI / 2; wall.position.set(x + CELL_SIZE / 2, 0.75, z); wall.castShadow = true; scene.add(wall); walls.push({ x: x + CELL_SIZE / 2, z, horizontal: false }); }
-      }
-    }
-
-    const zoneSize = 5;
-    const iceFloorGeom = new THREE.PlaneGeometry(zoneSize * CELL_SIZE, zoneSize * CELL_SIZE);
-    const iceFloorMesh = new THREE.Mesh(iceFloorGeom, iceFloorMaterial);
-    iceFloorMesh.rotation.x = -Math.PI / 2;
-    iceFloorMesh.position.y = 0.01;
-    iceFloorMesh.receiveShadow = true;
-    scene.add(iceFloorMesh);
-  }
-
-  function createPlayer() {
-    playerEntity = world.createEntity();
-    const startX = -(COLS / 2 - 0.5) * CELL_SIZE;
-    const startZ = -(ROWS / 2 - 0.5) * CELL_SIZE;
-    world.addComponent(playerEntity, ComponentTypes.TRANSFORM, { x: startX, y: 0.4, z: startZ });
-    world.addComponent(playerEntity, ComponentTypes.VELOCITY, { vx: 0, vz: 0 });
-    world.addComponent(playerEntity, ComponentTypes.PHYSICS, { ...physicsConfig, acceleration: { x: 0, z: 0 }, isGrounded: true });
-    world.addComponent(playerEntity, ComponentTypes.PLAYER, {});
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.3, 16, 16), new THREE.MeshStandardMaterial({ color: 0xffff00, emissive: 0x444400, emissiveIntensity: 0.3, roughness: 0.4, metalness: 0.1 }));
-    mesh.castShadow = true;
-    world.addComponent(playerEntity, ComponentTypes.RENDER, { mesh: mesh });
-    const light = new THREE.PointLight(0xffff88, 1.5, 10);
-    mesh.add(light);
-    world.addComponent(playerEntity, ComponentTypes.LIGHT, { light: light });
-    scene.add(mesh);
-  }
-
-  function createGoal() {
-    goalEntity = world.createEntity();
-    const goalX = (maze.end.c - COLS / 2 + 0.5) * CELL_SIZE;
-    const goalZ = (maze.end.r - ROWS / 2 + 0.5) * CELL_SIZE;
-    world.addComponent(goalEntity, ComponentTypes.TRANSFORM, { x: goalX, y: 0.5, z: goalZ });
-    world.addComponent(goalEntity, ComponentTypes.GOAL, {});
-    const mesh = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 1, 8), new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x004400, emissiveIntensity: 0.5 }));
-    world.addComponent(goalEntity, ComponentTypes.RENDER, { mesh: mesh });
-    const light = new THREE.PointLight(0x00ff00, 2, 8);
-    light.position.set(0, 1, 0);
-    mesh.add(light);
-    scene.add(mesh);
-  }
-
-  function createCollectibles(count) {
-    const geometry = new THREE.SphereGeometry(0.15, 8, 8);
-    const material = new THREE.MeshStandardMaterial({ color: 0xffd700, emissive: 0xccab00, metalness: 0.6, roughness: 0.2 });
-    for (let i = 0; i < count; i++) {
-      const collectibleId = world.createEntity();
-      let r, c;
-      do { r = Math.floor(Math.random() * ROWS); c = Math.floor(Math.random() * COLS); } while ((r === 0 && c === 0) || (r === ROWS - 1 && c === COLS - 1) || (maze.grid[r] && maze.grid[r][c].zone === 'ice'));
-      const x = (c - COLS / 2 + 0.5) * CELL_SIZE;
-      const z = (r - ROWS / 2 + 0.5) * CELL_SIZE;
-      world.addComponent(collectibleId, ComponentTypes.TRANSFORM, { x: x, y: 0.4, z: z });
-      const mesh = new THREE.Mesh(geometry, material);
-      world.addComponent(collectibleId, ComponentTypes.RENDER, { mesh: mesh });
-      world.addComponent(collectibleId, ComponentTypes.COLLECTIBLE, { value: 100 });
-      scene.add(mesh);
-    }
-  }
-
-  function createPowerUps(count) {
-    const geometry = new THREE.BoxGeometry(0.4, 0.4, 0.4);
-    const material = new THREE.MeshStandardMaterial({ color: 0x00aaff, emissive: 0x0066cc, metalness: 0.2, roughness: 0.1 });
-    for (let i = 0; i < count; i++) {
-      const powerUpId = world.createEntity();
-      let r, c;
-      do { r = Math.floor(Math.random() * ROWS); c = Math.floor(Math.random() * COLS); } while ((r === 0 && c === 0) || (r === ROWS - 1 && c === COLS - 1));
-      const x = (c - COLS / 2 + 0.5) * CELL_SIZE;
-      const z = (r - ROWS / 2 + 0.5) * CELL_SIZE;
-      world.addComponent(powerUpId, ComponentTypes.TRANSFORM, { x, y: 0.4, z });
-      const mesh = new THREE.Mesh(geometry, material);
-      world.addComponent(powerUpId, ComponentTypes.RENDER, { mesh });
-      world.addComponent(powerUpId, ComponentTypes.POWER_UP, { type: 'speed_boost', duration: 5000, multiplier: 1.5 });
-      scene.add(mesh);
-    }
-  }
-
-  /***** ──────────────────────────────────────────────────
-   * ECS SYSTEMS
-   * ────────────────────────────────────────────────── */
-  
-  function setupSystems() {
-    world.addSystem((world, deltaTime) => { const players = world.query([ComponentTypes.PLAYER, ComponentTypes.PHYSICS]); for (const entityId of players) { const physics = world.getComponent(entityId, ComponentTypes.PHYSICS); physics.acceleration.x = 0; physics.acceleration.z = 0; let inputX = 0, inputZ = 0; if (keyState['KeyD'] || keyState['ArrowRight']) inputX += 1; if (keyState['KeyA'] || keyState['ArrowLeft']) inputX -= 1; if (keyState['KeyS'] || keyState['ArrowDown']) inputZ += 1; if (keyState['KeyW'] || keyState['ArrowUp']) inputZ -= 1; const inputLength = Math.hypot(inputX, inputZ); if (inputLength > 0) { inputX /= inputLength; inputZ /= inputLength; const force = physics.moveForce; physics.acceleration.x += (inputX * force) / physics.mass; physics.acceleration.z += (inputZ * force) / physics.mass; } } });
-    world.addSystem((world, deltaTime) => { const physicsEntities = world.query([ComponentTypes.VELOCITY, ComponentTypes.PHYSICS]); deltaTime = Math.min(deltaTime, 1 / 30); for (const entityId of physicsEntities) { const velocity = world.getComponent(entityId, ComponentTypes.VELOCITY); const physics = world.getComponent(entityId, ComponentTypes.PHYSICS); velocity.vx += physics.acceleration.x * deltaTime; velocity.vz += physics.acceleration.z * deltaTime; const frictionFactor = Math.pow(physics.airResistance, deltaTime * 10); velocity.vx *= frictionFactor; velocity.vz *= frictionFactor; if (physics.isGrounded) { const groundFrictionFactor = Math.pow(physics.groundFriction, deltaTime * 8); velocity.vx *= groundFrictionFactor; velocity.vz *= groundFrictionFactor; } const currentSpeed = Math.hypot(velocity.vx, velocity.vz); if (currentSpeed > physics.maxSpeed) { const scale = physics.maxSpeed / currentSpeed; velocity.vx *= scale; velocity.vz *= scale; } if (Math.abs(velocity.vx) < 0.02) velocity.vx = 0; if (Math.abs(velocity.vz) < 0.02) velocity.vz = 0; } });
-    world.addSystem((world, deltaTime) => { const movableEntities = world.query([ComponentTypes.TRANSFORM, ComponentTypes.VELOCITY, ComponentTypes.PLAYER]); for (const entityId of movableEntities) { const transform = world.getComponent(entityId, ComponentTypes.TRANSFORM); const velocity = world.getComponent(entityId, ComponentTypes.VELOCITY); const oldX = transform.x; const oldZ = transform.z; transform.x += velocity.vx * deltaTime; if (checkCollision(transform.x, oldZ)) { transform.x = oldX; velocity.vx *= -physicsConfig.bounciness; velocity.vz *= physicsConfig.wallFriction; if (Math.abs(velocity.vx) > 1.5) audioSystem.playSound('collision'); } transform.z += velocity.vz * deltaTime; if (checkCollision(transform.x, transform.z)) { transform.z = oldZ; velocity.vz *= -physicsConfig.bounciness; velocity.vx *= physicsConfig.wallFriction; if (Math.abs(velocity.vz) > 1.5) audioSystem.playSound('collision'); } } });
-    world.addSystem((world, deltaTime) => { const renderableEntities = world.query([ComponentTypes.TRANSFORM, ComponentTypes.RENDER]); for (const entityId of renderableEntities) { const transform = world.getComponent(entityId, ComponentTypes.TRANSFORM); const render = world.getComponent(entityId, ComponentTypes.RENDER); if (render.mesh) { render.mesh.position.set(transform.x, transform.y, transform.z); if (world.hasComponent(entityId, ComponentTypes.PLAYER)) { const velocity = world.getComponent(entityId, ComponentTypes.VELOCITY); render.mesh.rotation.x += velocity.vz * deltaTime * 0.5; render.mesh.rotation.z -= velocity.vx * deltaTime * 0.5; } } } });
-    world.addSystem((world) => { if (gameCompleted) return; const player = world.query([ComponentTypes.PLAYER, ComponentTypes.TRANSFORM])[0]; if (!player) return; const playerTransform = world.getComponent(player, ComponentTypes.TRANSFORM); const collectibles = world.query([ComponentTypes.COLLECTIBLE, ComponentTypes.TRANSFORM, ComponentTypes.RENDER]); for (const collectibleId of collectibles) { const collectibleTransform = world.getComponent(collectibleId, ComponentTypes.TRANSFORM); const distance = Math.hypot(playerTransform.x - collectibleTransform.x, playerTransform.z - collectibleTransform.z); if (distance < 0.5) { score += world.getComponent(collectibleId, ComponentTypes.COLLECTIBLE).value; document.getElementById('score').textContent = score; audioSystem.playSound('collect'); scene.remove(world.getComponent(collectibleId, ComponentTypes.RENDER).mesh); world.removeEntity(collectibleId); } } });
-    world.addSystem((world) => { if (gameCompleted) return; const player = world.query([ComponentTypes.PLAYER, ComponentTypes.TRANSFORM, ComponentTypes.PHYSICS, ComponentTypes.LIGHT])[0]; if (!player) return; const playerTransform = world.getComponent(player, ComponentTypes.TRANSFORM); const powerUps = world.query([ComponentTypes.POWER_UP, ComponentTypes.TRANSFORM, ComponentTypes.RENDER]); for (const powerUpId of powerUps) { const powerUpTransform = world.getComponent(powerUpId, ComponentTypes.TRANSFORM); const distance = Math.hypot(playerTransform.x - powerUpTransform.x, playerTransform.z - powerUpTransform.z); if (distance < 0.6) { const powerUp = world.getComponent(powerUpId, ComponentTypes.POWER_UP); const physics = world.getComponent(player, ComponentTypes.PHYSICS); const light = world.getComponent(player, ComponentTypes.LIGHT).light; audioSystem.playSound('powerup'); physics.maxSpeed *= powerUp.multiplier; physics.moveForce *= powerUp.multiplier; light.intensity *= 2; document.getElementById('powerup-status').style.opacity = '1'; if (activePowerUpTimer) clearTimeout(activePowerUpTimer); activePowerUpTimer = setTimeout(() => { physics.maxSpeed = physicsConfig.maxSpeed; physics.moveForce = physicsConfig.moveForce; light.intensity /= 2; document.getElementById('powerup-status').style.opacity = '0'; activePowerUpTimer = null; }, powerUp.duration); scene.remove(world.getComponent(powerUpId, ComponentTypes.RENDER).mesh); world.removeEntity(powerUpId); } } });
-    world.addSystem((world) => { const player = world.query([ComponentTypes.PLAYER, ComponentTypes.TRANSFORM, ComponentTypes.PHYSICS])[0]; if (!player) return; const transform = world.getComponent(player, ComponentTypes.TRANSFORM); const physics = world.getComponent(player, ComponentTypes.PHYSICS); const playerRow = Math.floor((transform.z + ROWS * CELL_SIZE / 2) / CELL_SIZE); const playerCol = Math.floor((transform.x + COLS * CELL_SIZE / 2) / CELL_SIZE); if (maze.grid[playerRow] && maze.grid[playerRow][playerCol] && maze.grid[playerRow][playerCol].zone === 'ice') { if (!physics.inIceZone) { physics.inIceZone = true; audioSystem.playSound('ice_enter'); } physics.groundFriction = 0.99; physics.airResistance = 1.0; } else { physics.inIceZone = false; physics.groundFriction = physicsConfig.groundFriction; physics.airResistance = physicsConfig.airResistance; } });
-    world.addSystem((world) => { if (gameCompleted) return; const players = world.query([ComponentTypes.PLAYER, ComponentTypes.TRANSFORM]); if (players.length === 0) return; const playerTransform = world.getComponent(players[0], ComponentTypes.TRANSFORM); const goals = world.query([ComponentTypes.GOAL, ComponentTypes.TRANSFORM]); if (goals.length === 0) return; const goalTransform = world.getComponent(goals[0], ComponentTypes.TRANSFORM); const distance = Math.hypot(playerTransform.x - goalTransform.x, playerTransform.z - goalTransform.z); if (distance < 1) { gameCompleted = true; const timeBonus = Math.max(0, 10000 - Math.floor(gameTime * 10)); score += timeBonus; document.getElementById('score').textContent = score; audioSystem.playSound('goal'); document.getElementById('goal-indicator').style.opacity = '1'; setTimeout(initializeGame, 3000); } });
-    world.addSystem(() => { if (gameCompleted) return; gameTime = (performance.now() - levelStartTime) / 1000; const minutes = Math.floor(gameTime / 60).toString().padStart(2, '0'); const seconds = Math.floor(gameTime % 60).toString().padStart(2, '0'); document.getElementById('timer').textContent = `${minutes}:${seconds}`; });
-    world.addSystem((world) => { if (!physicsDebugEnabled) return; const player = world.query([ComponentTypes.PLAYER, ComponentTypes.VELOCITY, ComponentTypes.PHYSICS])[0]; if (!player) return; const velocity = world.getComponent(player, ComponentTypes.VELOCITY); const physics = world.getComponent(player, ComponentTypes.PHYSICS); const speed = Math.hypot(velocity.vx, velocity.vz); document.getElementById('debug-speed').textContent = speed.toFixed(2); document.getElementById('debug-vx').textContent = velocity.vx.toFixed(2); document.getElementById('debug-vz').textContent = velocity.vz.toFixed(2); document.getElementById('debug-ax').textContent = physics.acceleration.x.toFixed(2); document.getElementById('debug-az').textContent = physics.acceleration.z.toFixed(2); });
-  }
-
-  function checkCollision(x,z,radius=.3){const buffer=.1;if(x<-COLS*CELL_SIZE/2+radius||x>COLS*CELL_SIZE/2-radius||z<-ROWS*CELL_SIZE/2+radius||z>ROWS*CELL_SIZE/2-radius)return!0;for(const wall of walls){const dx=Math.abs(x-wall.x),dz=Math.abs(z-wall.z);if(wall.horizontal){if(dz<radius+buffer&&dx<CELL_SIZE/2+radius)return!0}else if(dx<radius+buffer&&dz<CELL_SIZE/2+radius)return!0}return!1}
-
-  /***** ──────────────────────────────────────────────────
-   * INPUT HANDLING
-   * ────────────────────────────────────────────────── */
-  
-  const keyState = {};
-  window.addEventListener('keydown', (e) => {
-    if (audioSystem) { audioSystem.startMusic(); }
-    keyState[e.code] = true;
-    if (document.activeElement === document.body) {
-        if (e.code === 'KeyC') { cameraSystem.toggleMode(); }
-        else if (e.code === 'KeyM') { minimapSystem.toggle(); }
-        else if (e.code === 'KeyR') { initializeGame(); }
-        else if (e.code === 'KeyP') {
-            physicsDebugEnabled = !physicsDebugEnabled;
-            document.getElementById('physics-debug').style.display = physicsDebugEnabled ? 'block' : 'none';
-        }
-        else if (e.code === 'KeyJ') { if (audioSystem) audioSystem.toggleMusic(); }
-        else if (e.code === 'KeyK') { if (audioSystem) audioSystem.toggleSfx(); }
-    }
-  });
-  window.addEventListener('keyup', (e) => { keyState[e.code] = false; });
-  window.addEventListener('resize', () => { camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); });
-  document.getElementById('toggle-music').addEventListener('click', () => { if (audioSystem) audioSystem.toggleMusic(); });
-  document.getElementById('toggle-sfx').addEventListener('click', () => { if (audioSystem) audioSystem.toggleSfx(); });
-
-  /***** ──────────────────────────────────────────────────
-   * MAIN GAME LOOP
-   * ────────────────────────────────────────────────── */
-  
-  let lastTime = performance.now();
-  function gameLoop(currentTime) {
-    requestAnimationFrame(gameLoop);
-    const rawDeltaTime = (currentTime - lastTime) / 1000;
-    lastTime = currentTime;
-    const deltaTime = Math.min(rawDeltaTime, 1/30); 
-    if (world) { world.update(deltaTime); }
-    if (cameraSystem) { cameraSystem.update(world); }
-    if (minimapSystem) { minimapSystem.update(world); }
-    renderer.render(scene, camera);
-  }
-
-  // Initialize and start the game
-  initializeGame();
-  gameLoop(lastTime);
-  console.log("🎮 Advanced Physics-Based Maze Game Loaded! V5 with Special Zones.");
-
-} catch (error) {
-  console.error("Failed to initialize maze game:", error);
-  document.body.innerHTML = `<div style="color:white;text-align:center;margin-top:50px;font-family:Arial;"><h2>Failed to initialize maze game</h2><p>Error: ${error.message}</p><p>Please check the browser console for more details.</p></div>`;
-}
-</script>
+    });
+  </script>
 </body>
 </html>
