@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html>
 <head>
@@ -227,6 +228,93 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
   
   <script>
+    class FSMState {
+        constructor(fsm) {
+            this.fsm = fsm;
+        }
+        enter() {}
+        exit() {}
+        update(playerPos, deltaTime) {}
+    }
+
+    class PatrollingState extends FSMState {
+        enter() {
+            const ai = this.fsm.ai;
+            ai.lastDirection = Math.random() * Math.PI * 2;
+        }
+
+        update(playerPos, deltaTime) {
+            const { ai, enemy, velocity, position, game } = this.fsm;
+            
+            if (enemy.type === 'chaser' && Math.hypot(playerPos.x - position.x, playerPos.z - position.z) < game.constants.AI_CHASE_RADIUS) {
+                this.fsm.currentState = new ChasingState(this.fsm);
+                return;
+            }
+
+            if (ai.timer % 120 === 0) {
+                ai.lastDirection = Math.random() * Math.PI * 2;
+            }
+            velocity.x = Math.cos(ai.lastDirection) * enemy.speed;
+            velocity.z = Math.sin(ai.lastDirection) * enemy.speed;
+        }
+    }
+
+    class ChasingState extends FSMState {
+        enter() {
+            this.fsm.game._playSound('enemyAlert');
+        }
+
+        update(playerPos, deltaTime) {
+            const { enemy, velocity, position, game } = this.fsm;
+            const distToPlayer = Math.hypot(playerPos.x - position.x, playerPos.z - position.z);
+            
+            if (distToPlayer > game.constants.AI_PATROL_RADIUS) {
+                this.fsm.currentState = new PatrollingState(this.fsm);
+                return;
+            }
+            
+            if (distToPlayer > 0.1) {
+                const chaseSpeed = enemy.speed * 1.5;
+                velocity.x = (playerPos.x - position.x) / distToPlayer * chaseSpeed;
+                velocity.z = (playerPos.z - position.z) / distToPlayer * chaseSpeed;
+            }
+        }
+    }
+
+    class FiniteStateMachine {
+        constructor(game, eid) {
+            this.game = game;
+            this.eid = eid;
+            this.ai = game.AI.get(eid);
+            this.enemy = game.Enemy.get(eid);
+            this.velocity = game.Velocity.get(eid);
+            this.position = game.Position.get(eid);
+            
+            this._currentState = null;
+        }
+
+        get currentState() {
+            return this._currentState;
+        }
+
+        set currentState(newState) {
+            if (this._currentState) {
+                this._currentState.exit();
+            }
+            this._currentState = newState;
+            if (this._currentState) {
+                this._currentState.enter();
+            }
+        }
+
+        update(playerPos, deltaTime) {
+            if (this._currentState) {
+                this._currentState.update(playerPos, deltaTime);
+            }
+        }
+    }
+
+
     class SimpleECS {
         constructor() {
             this.entities = new Set();
@@ -426,19 +514,18 @@
                 INITIAL_MAZE_SIZE: 31, CELL_SIZE: 2.5, WALL_HEIGHT: 3,
                 JUMP_COST: 25, JUMP_COOLDOWN: 1500,
                 PARTICLE_POOL_SIZE: 300,
-                // MODIFIED: Tuned physics values for a weightier feel
                 PLAYER_FORCE: 35.0,
                 JUMP_FORCE: 25.0,
-                FRICTION: 0.96, // A little less friction to allow for more coasting
+                FRICTION: 0.96,
                 PLAYER_RADIUS: 0.5,
-                // NEW: Bounciness factor for walls
-                WALL_RESTITUTION: 0.4
+                WALL_RESTITUTION: 0.4,
+                AI_CHASE_RADIUS: 10.0,
+                AI_PATROL_RADIUS: 15.0,
             };
             this.colors = {
                 primary: 0x00f4ff, secondary: 0x0080ff, accent: 0x8000ff,
                 warning: 0xff6b00, success: 0x00ff80, wall: 0x2a4858,
                 ground: 0x1a2332,
-                // NEW: Color for sparks
                 sparks: 0xffd700
             };
 
@@ -528,7 +615,6 @@
             
             try {
                 await Tone.start();
-                console.log('Audio context started');
                 this.state.audioInitialized = true;
                 this._createAudioSources();
                 this._startAmbientSound();
@@ -580,22 +666,16 @@
                 this.state.ambientDrone.connect(this.state.ambientFilter);
                 this.state.ambientPulse.connect(this.state.ambientFilter);
                 this.state.ambientLFO.connect(this.state.ambientFilter.frequency);
-                console.log("Audio sources created successfully");
-            } catch (e) {
-                console.error("Failed to create audio sources:", e);
-            }
+            } catch (e) { console.error("Failed to create audio sources:", e); }
         }
 
         _startAmbientSound() {
             if (!this.state.audioInitialized) return;
-            
             try {
                 this.state.ambientDrone?.start();
                 this.state.ambientPulse?.start();
                 this.state.ambientLFO?.start();
-            } catch (e) {
-                console.warn("Failed to start ambient sound:", e);
-            }
+            } catch (e) { console.warn("Failed to start ambient sound:", e); }
         }
 
         _playSound(soundName, options = {}) {
@@ -603,7 +683,6 @@
             
             try {
                 const now = Tone.now();
-                
                 switch(soundName) {
                     case 'move':
                         if (this.state.moveSynth) {
@@ -662,7 +741,6 @@
                     case 'uiClick':
                         if (this.state.uiClickSynth) { this.state.uiClickSynth.triggerAttackRelease(800, "64n", now); }
                         break;
-                    // NEW: A sound for wall scrapes/sparks
                     case 'scrape':
                         if (this.state.moveSynth) {
                            this.state.moveSynth.triggerAttackRelease(400 + Math.random() * 200, "64n", now);
@@ -996,6 +1074,29 @@
             ecs.addComponent(this.world, this.ThreeJSObject, eid, { eid });
         }
         
+        // FIXED: This function was accidentally deleted and has been restored.
+        _createPowerUp(x, y, z, type) {
+            const eid = ecs.addEntity(this.world);
+            const colors = { speed: 0x00ffff, energy: 0xffff00, shield: 0x00ff00, multiplier: 0xff00ff };
+            const mesh = new THREE.Mesh(
+                new THREE.TetrahedronGeometry(0.6),
+                new THREE.MeshStandardMaterial({ 
+                    color: colors[type], 
+                    emissive: colors[type], 
+                    emissiveIntensity: 0.5,
+                    transparent: true,
+                    opacity: 0.8
+                })
+            );
+            this.state.scene.add(mesh);
+            this.threeJSObjectMap.set(eid, mesh);
+            
+            ecs.addComponent(this.world, this.PowerUp, eid, { type });
+            ecs.addComponent(this.world, this.Position, eid, { x, y, z });
+            ecs.addComponent(this.world, this.Animation, eid, { speed: 0.01, phase: Math.random() * Math.PI * 2 });
+            ecs.addComponent(this.world, this.ThreeJSObject, eid, { eid });
+        }
+        
         _createTrail() {
             const eid = ecs.addEntity(this.world);
             const mesh = new THREE.Line(new THREE.BufferGeometry(), new THREE.LineBasicMaterial({ color: this.colors.primary, transparent: true, opacity: 0.6 }));
@@ -1029,11 +1130,7 @@
 
         _createParticlesBurst(x, y, z, color, count) {
             for (let i = 0; i < count; i++) {
-                const velocity = {
-                    x: (Math.random() - 0.5) * 3,
-                    y: (Math.random() - 0.5) * 3,
-                    z: (Math.random() - 0.5) * 3
-                };
+                const velocity = { x: (Math.random() - 0.5) * 3, y: (Math.random() - 0.5) * 3, z: (Math.random() - 0.5) * 3 };
                 this._spawnParticleFromPool(x, y, z, color, 20 + Math.random() * 20, velocity);
             }
         }
@@ -1044,31 +1141,26 @@
             if (type === 'patrol') {
                 color = this.colors.warning;
                 mesh = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.8, 0.8), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.3 }));
-            } else {
+            } else { // chaser
                 color = 0xff0066;
                 mesh = new THREE.Mesh(new THREE.ConeGeometry(0.5, 1.2, 6), new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.4 }));
             }
+            
             mesh.castShadow = true;
             this.state.scene.add(mesh);
             this.threeJSObjectMap.set(eid, mesh);
+            
             ecs.addComponent(this.world, this.Enemy, eid, { type, speed: type === 'chaser' ? 2 : 1.5 });
             ecs.addComponent(this.world, this.Position, eid, { x, y, z });
             ecs.addComponent(this.world, this.Velocity, eid, { x: 0, y: 0, z: 0 });
-            ecs.addComponent(this.world, this.AI, eid, { target: { x, y, z }, lastDirection: Math.random() * Math.PI * 2, timer: 0 });
             ecs.addComponent(this.world, this.Animation, eid, { speed: 0.05, phase: Math.random() * Math.PI * 2 });
             ecs.addComponent(this.world, this.ThreeJSObject, eid, { eid });
-        }
 
-        _createPowerUp(x, y, z, type) {
-            const eid = ecs.addEntity(this.world);
-            const colors = { speed: 0x00ffff, energy: 0xffff00, shield: 0x00ff00, multiplier: 0xff00ff };
-            const mesh = new THREE.Mesh(new THREE.TetrahedronGeometry(0.6), new THREE.MeshStandardMaterial({ color: colors[type], emissive: colors[type], emissiveIntensity: 0.5, transparent: true, opacity: 0.8 }));
-            this.state.scene.add(mesh);
-            this.threeJSObjectMap.set(eid, mesh);
-            ecs.addComponent(this.world, this.PowerUp, eid, { type });
-            ecs.addComponent(this.world, this.Position, eid, { x, y, z });
-            ecs.addComponent(this.world, this.Animation, eid, { speed: 0.01, phase: Math.random() * Math.PI * 2 });
-            ecs.addComponent(this.world, this.ThreeJSObject, eid, { eid });
+            ecs.addComponent(this.world, this.AI, eid, { timer: 0 });
+            const fsm = new FiniteStateMachine(this, eid);
+            this.AI.get(eid).fsm = fsm;
+            
+            fsm.currentState = new PatrollingState(fsm);
         }
 
         _inputSystem(deltaTime) {
@@ -1078,7 +1170,7 @@
             const velocity = this.Velocity.get(eid);
             
             const { PLAYER_FORCE, JUMP_FORCE } = this.constants;
-            const speedBonus = ecs.hasComponent(this.world, this.SpeedBoost, this.state.playerEid) ? 1.5 : 1;
+            const speedBonus = ecs.hasComponent(this.world, this.SpeedBoost, eid) ? 1.5 : 1;
             const boostMultiplier = this.activeActions.has('BOOST') && this.gameState.energy > 0 ? 2.5 : 1;
             const finalMultiplier = boostMultiplier * speedBonus;
             
@@ -1144,7 +1236,6 @@
             }
         }
         
-        // MODIFIED: Entirely new collision response logic
         _collisionSystem(deltaTime) {
             const playerQuery = ecs.defineQuery([this.Player, this.Position, this.Velocity]);
             const collectibleQuery = ecs.defineQuery([this.Collectible, this.Position]);
@@ -1172,7 +1263,6 @@
                         const wallWorldX = (x - halfSize) * CELL_SIZE;
                         const wallWorldZ = (z - halfSize) * CELL_SIZE;
                         
-                        // AABB collision check
                         const closestX = Math.max(wallWorldX - w_half, Math.min(playerPos.x, wallWorldX + w_half));
                         const closestZ = Math.max(wallWorldZ - w_half, Math.min(playerPos.z, wallWorldZ + w_half));
                         
@@ -1181,26 +1271,20 @@
                         const distanceSq = (dist_x * dist_x) + (dist_z * dist_z);
 
                         if (distanceSq < (PLAYER_RADIUS * PLAYER_RADIUS)) {
-                            // Collision detected, find the normal
                             const normal = new THREE.Vector2(dist_x, dist_z).normalize();
                             
-                            // Move player out of the wall to prevent sticking
                             const penetrationDepth = PLAYER_RADIUS - Math.sqrt(distanceSq);
                             playerPos.x += normal.x * penetrationDepth;
                             playerPos.z += normal.y * penetrationDepth;
 
-                            // Calculate the velocity component along the normal
                             const dot = playerVel.x * normal.x + playerVel.z * normal.y;
                             
-                            // Calculate the impulse for bouncing (restitution)
                             const impulseX = (1 + WALL_RESTITUTION) * dot * normal.x;
                             const impulseZ = (1 + WALL_RESTITUTION) * dot * normal.y;
                             
-                            // Apply the bounce
                             playerVel.x -= impulseX;
                             playerVel.z -= impulseZ;
 
-                            // If skidding, create sparks
                             const speed = Math.hypot(playerVel.x, playerVel.z);
                             if (speed > 2.0) {
                                 this._createParticlesBurst(closestX, playerPos.y, closestZ, this.colors.sparks, 1);
@@ -1211,7 +1295,6 @@
                 }
             }
             
-            // --- Other collision checks remain the same ---
             for (const c_eid of [...collectibleQuery(this.world)]) {
                 const collectiblePos = this.Position.get(c_eid);
                 const dist = Math.hypot(playerPos.x - collectiblePos.x, playerPos.z - collectiblePos.z);
@@ -1355,7 +1438,7 @@
                 
                 const velocity = this.Velocity.get(eid);
                 if (velocity) {
-                    velocity.y -= 0.008; // Stronger gravity for particles
+                    velocity.y -= 0.008;
                 }
                 
                 const mesh = this.threeJSObjectMap.get(eid);
@@ -1367,40 +1450,34 @@
 
         _aiSystem(deltaTime) {
             if (!ecs.entityExists(this.world, this.state.playerEid)) return;
-            const enemyQuery = ecs.defineQuery([this.Enemy, this.Position, this.Velocity, this.AI]);
+            const enemyQuery = ecs.defineQuery([this.AI]);
             const enemies = enemyQuery(this.world);
             const playerPos = this.Position.get(this.state.playerEid);
+            
             for (const eid of enemies) {
-                const enemy = this.Enemy.get(eid);
-                const position = this.Position.get(eid);
-                const velocity = this.Velocity.get(eid);
                 const ai = this.AI.get(eid);
                 ai.timer++;
-                const distToPlayer = Math.hypot(playerPos.x - position.x, playerPos.z - position.z);
-                if (distToPlayer < 5 && ai.timer % 60 === 0 && enemy.type === 'chaser') { this._playSound('enemyAlert'); }
-                if (enemy.type === 'patrol') {
-                    if (ai.timer % 120 === 0) { ai.lastDirection = Math.random() * Math.PI * 2; }
-                    velocity.x = Math.cos(ai.lastDirection) * enemy.speed;
-                    velocity.z = Math.sin(ai.lastDirection) * enemy.speed;
-                } else if (enemy.type === 'chaser') {
-                    const dx = playerPos.x - position.x;
-                    const dz = playerPos.z - position.z;
-                    const distance = Math.hypot(dx, dz);
-                    if (distance > 0.1) {
-                        const chaseSpeed = enemy.speed * (1 + Math.sin(ai.timer * 0.1) * 0.2);
-                        velocity.x = (dx / distance) * chaseSpeed;
-                        velocity.z = (dz / distance) * chaseSpeed;
-                    }
+                
+                if (ai.fsm) {
+                    ai.fsm.update(playerPos, deltaTime);
                 }
-                const nextX = position.x + velocity.x * 15 * deltaTime;
-                const nextZ = position.z + velocity.z * 15 * deltaTime;
+
+                const position = this.Position.get(eid);
+                const velocity = this.Velocity.get(eid);
+                const nextX = position.x + (velocity.x * 15 * deltaTime);
+                const nextZ = position.z + (velocity.z * 15 * deltaTime);
                 const size = this.state.currentMazeSize;
                 const cellSize = this.constants.CELL_SIZE;
                 const mazeX = Math.floor((nextX / cellSize) + size / 2);
                 const mazeZ = Math.floor((nextZ / cellSize) + size / 2);
+                
                 if (mazeX < 0 || mazeX >= size || mazeZ < 0 || mazeZ >= size || (this.state.maze[mazeZ] && this.state.maze[mazeZ][mazeX] === 1)) {
-                    if (enemy.type === 'patrol') { ai.lastDirection += (Math.PI / 2) + (Math.random() - 0.5) * Math.PI / 4; } 
-                    else { const perpendicular = ai.lastDirection + Math.PI / 2; velocity.x = Math.cos(perpendicular) * enemy.speed; velocity.z = Math.sin(perpendicular) * enemy.speed; ai.lastDirection = perpendicular; }
+                    if (ai.lastDirection) {
+                        ai.lastDirection += (Math.PI / 2) + (Math.random() - 0.5) * Math.PI / 4;
+                    } else {
+                        velocity.x *= -1;
+                        velocity.z *= -1;
+                    }
                 }
             }
         }
@@ -1448,7 +1525,6 @@
             }
         }
 
-        // MODIFIED: Added realistic rolling simulation
         _renderSystem(deltaTime) {
             const renderQuery = ecs.defineQuery([this.Position, this.ThreeJSObject]);
             const entities = renderQuery(this.world);
@@ -1459,7 +1535,6 @@
                     mesh.position.set(position.x, position.y, position.z);
                     if(ecs.hasComponent(this.world, this.Player, eid)) {
                         const velocity = this.Velocity.get(eid);
-                        // This simulates the sphere's rolling based on its velocity
                         const rotationAxis = new THREE.Vector3(velocity.z, 0, -velocity.x).normalize();
                         const angularSpeed = Math.hypot(velocity.x, velocity.z) / this.constants.PLAYER_RADIUS;
                         const quaternion = new THREE.Quaternion();
