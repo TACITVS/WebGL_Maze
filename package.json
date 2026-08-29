@@ -1,0 +1,6 @@
+{
+  "name": "nexus-maze",
+  "private": true,
+  "type": "module",
+  "description": "WebGL maze runner and 3D dungeon generator prototypes."
+}
