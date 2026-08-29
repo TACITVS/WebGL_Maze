@@ -19,7 +19,7 @@ python -m http.server 8000
 ├── index.html          # Nexus Maze: bootstraps the UI shell and loads the entrypoint
 ├── dungeon.html        # Nexus Depths: the playable dungeon crawler
 ├── lab.html            # Nexus Depths: generator + validation tooling
-├── lab-sprites.html    # Nexus Depths: sprite sheet preview
+├── lab-sprites.html    # Nexus Depths: palette + sprite reference
 ├── styles/             # Global styling resources
 ├── src/
 │   ├── audio/          # Tone.js integration and sound design
@@ -51,15 +51,19 @@ minutes and your best score persists.
 - **Left click** pulse · **Right click** / **Space** blast · **Esc** pause
 
 It renders at 340p and scales up with nearest-neighbour filtering, so the pixels
-are real. Enemies are billboard sprites, the HUD is drawn with a 5x7 bitmap font
-onto its own canvas, and every sprite is painted at boot with `fillRect` calls —
-there are no binary assets in the repository. Music and every sound effect are
-synthesised at runtime with the Web Audio API, so there are no audio files or
-libraries either.
+are real. Every colour — sprites, masonry, props, HUD, menus — comes from one
+39-colour palette of hue-shifted ramps, and every creature is built from the same
+three materials: bone, corroded verdigris and an ember core. The core is drawn on
+its own unlit layer, so the aim point and the attack telegraph are the same pixel.
 
-Design notes, enemy stats and how the balance was measured are in
-[docs/GAME_DESIGN.md](docs/GAME_DESIGN.md). `lab-sprites.html` renders the sprite
-sheet at 6x for working on the art.
+Enemies are billboard sprites, the HUD is drawn with a 5x7 bitmap font onto its
+own canvas, and every sprite is painted at boot with `fillRect` calls — there are
+no binary assets in the repository. Music and every sound effect are synthesised
+at runtime with the Web Audio API, so there are no audio files or libraries either.
+
+Design notes, enemy stats, the art direction and how the balance was measured are
+in [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md). `lab-sprites.html` is the art
+reference: the palette with hex values and the full cast at 5x.
 
 ## The generator underneath
 

@@ -9,6 +9,7 @@
 
 import { TILE, TILE_SIZE, DIRS, FloorPlan, greedyRects, isWalkable, isOpen } from './grid.js';
 import { SHAFT_ACROSS, SHAFT_ALONG } from './generator.js';
+import { rgb } from './palette.js';
 
 /** Renderable axis-aligned box. `emissive` lifts a surface out of the lighting. */
 export class Box {
@@ -350,43 +351,54 @@ function buildProp(prop, boxes, blockers) {
   };
   switch (prop.kind) {
     case 'pillar':
-      push(new Box(prop.x, y + 1.6, prop.z, 0.32, 1.6, 0.32, shade(accent, 0.7), 'prop'), true);
-      push(new Box(prop.x, y + 0.12, prop.z, 0.46, 0.12, 0.46, shade(accent, 0.6), 'prop'), false);
+      push(new Box(prop.x, y + 1.6, prop.z, 0.32, 1.6, 0.32, rgb('stone', 2), 'prop'), true);
+      push(new Box(prop.x, y + 0.12, prop.z, 0.46, 0.12, 0.46, rgb('stone', 1), 'prop'), false);
+      push(new Box(prop.x, y + 3.1, prop.z, 0.44, 0.14, 0.44, rgb('stone', 3), 'prop'), false);
       break;
     case 'crate':
-      push(new Box(prop.x, y + 0.34, prop.z, 0.34, 0.34, 0.34, [0.38, 0.28, 0.18], 'prop'), true);
+      push(new Box(prop.x, y + 0.34, prop.z, 0.34, 0.34, 0.34, rgb('bone', 1), 'prop'), true);
+      push(new Box(prop.x, y + 0.69, prop.z, 0.36, 0.03, 0.36, rgb('verdigris', 2), 'prop'), false);
       break;
     case 'shelf':
-      push(new Box(prop.x, y + 0.95, prop.z, 0.55, 0.95, 0.22, [0.30, 0.22, 0.15], 'prop'), true);
+      push(new Box(prop.x, y + 0.95, prop.z, 0.55, 0.95, 0.22, rgb('bone', 0), 'prop'), true);
+      push(new Box(prop.x, y + 1.3, prop.z, 0.5, 0.06, 0.24, rgb('bone', 2), 'prop'), false);
+      push(new Box(prop.x, y + 0.7, prop.z, 0.5, 0.06, 0.24, rgb('bone', 2), 'prop'), false);
       break;
     case 'sarcophagus':
-      push(new Box(prop.x, y + 0.35, prop.z, 0.62, 0.35, 0.34, [0.42, 0.41, 0.38], 'prop'), true);
-      push(new Box(prop.x, y + 0.76, prop.z, 0.55, 0.08, 0.28, shade(accent, 0.9), 'prop'), false);
+      push(new Box(prop.x, y + 0.35, prop.z, 0.62, 0.35, 0.34, rgb('stone', 2), 'prop'), true);
+      push(new Box(prop.x, y + 0.76, prop.z, 0.55, 0.08, 0.28, rgb('bone', 2), 'prop'), false);
+      push(new Box(prop.x, y + 0.5, prop.z, 0.64, 0.05, 0.36, rgb('verdigris', 2), 'prop'), false);
       break;
     case 'altar':
-      push(new Box(prop.x, y + 0.45, prop.z, 0.55, 0.45, 0.55, [0.40, 0.39, 0.36], 'prop'), true);
-      push(new Box(prop.x, y + 1.0, prop.z, 0.22, 0.22, 0.22, accent, 'prop', 0.85), false);
+      push(new Box(prop.x, y + 0.45, prop.z, 0.55, 0.45, 0.55, rgb('stone', 2), 'prop'), true);
+      push(new Box(prop.x, y + 0.94, prop.z, 0.62, 0.06, 0.62, rgb('stone', 3), 'prop'), false);
+      push(new Box(prop.x, y + 1.12, prop.z, 0.2, 0.2, 0.2, accent, 'prop', 0.9), false);
       break;
     case 'chest':
-      push(new Box(prop.x, y + 0.28, prop.z, 0.42, 0.28, 0.30, [0.34, 0.24, 0.14], 'prop'), true);
-      push(new Box(prop.x, y + 0.60, prop.z, 0.42, 0.10, 0.30, [0.72, 0.56, 0.22], 'prop', 0.3), false);
+      push(new Box(prop.x, y + 0.28, prop.z, 0.42, 0.28, 0.30, rgb('bone', 1), 'prop'), true);
+      push(new Box(prop.x, y + 0.60, prop.z, 0.42, 0.10, 0.30, rgb('ember', 3), 'prop', 0.35), false);
+      push(new Box(prop.x, y + 0.42, prop.z, 0.44, 0.04, 0.32, rgb('verdigris', 2), 'prop'), false);
       break;
     case 'brazier':
-      push(new Box(prop.x, y + 0.35, prop.z, 0.20, 0.35, 0.20, [0.28, 0.26, 0.24], 'prop'), true);
-      push(new Box(prop.x, y + 0.80, prop.z, 0.26, 0.16, 0.26, prop.accent || [1, 0.6, 0.25], 'flame', 1.0), false);
+      push(new Box(prop.x, y + 0.35, prop.z, 0.20, 0.35, 0.20, rgb('verdigris', 1), 'prop'), true);
+      push(new Box(prop.x, y + 0.68, prop.z, 0.28, 0.06, 0.28, rgb('verdigris', 2), 'prop'), false);
+      push(new Box(prop.x, y + 0.84, prop.z, 0.24, 0.16, 0.24, prop.accent || rgb('ember', 4), 'flame', 1.0), false);
       break;
     case 'torch': {
       const d = prop.dir || { dx: 0, dz: 1 };
-      push(new Box(prop.x, y + 1.85, prop.z, 0.09 + Math.abs(d.dz) * 0.05, 0.28, 0.09 + Math.abs(d.dx) * 0.05, [0.22, 0.19, 0.16], 'prop'), false);
-      push(new Box(prop.x, y + 2.12, prop.z, 0.13, 0.16, 0.13, prop.color || [1, 0.7, 0.35], 'flame', 1.0), false);
+      push(new Box(prop.x, y + 1.85, prop.z, 0.09 + Math.abs(d.dz) * 0.05, 0.28, 0.09 + Math.abs(d.dx) * 0.05, rgb('verdigris', 1), 'prop'), false);
+      push(new Box(prop.x, y + 2.12, prop.z, 0.13, 0.16, 0.13, prop.color || rgb('ember', 4), 'flame', 1.0), false);
       break;
     }
     case 'key':
-      push(new Box(prop.x, y + 0.85, prop.z, 0.13, 0.20, 0.13, prop.color, 'key', 1.0), false);
-      push(new Box(prop.x, y + 0.1, prop.z, 0.34, 0.1, 0.34, shade(prop.color, 0.4), 'prop'), false);
+      // Only the plinth is geometry; the key itself is a sprite, so it reads as
+      // an object rather than a floating cube.
+      push(new Box(prop.x, y + 0.08, prop.z, 0.32, 0.08, 0.32, rgb('stone', 2), 'prop'), false);
+      push(new Box(prop.x, y + 0.17, prop.z, 0.22, 0.03, 0.22, shade(prop.color, 0.5), 'prop', 0.4), false);
       break;
     case 'portal':
-      push(new Box(prop.x, y + 0.06, prop.z, 0.75, 0.06, 0.75, [0.35, 0.62, 0.72], 'prop', 0.45), false);
+      push(new Box(prop.x, y + 0.06, prop.z, 0.75, 0.06, 0.75, rgb('ice', 2), 'prop', 0.45), false);
+      push(new Box(prop.x, y + 0.10, prop.z, 0.52, 0.05, 0.52, rgb('ice', 3), 'prop', 0.7), false);
       break;
     default:
       break;

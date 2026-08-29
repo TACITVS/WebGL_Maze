@@ -8,19 +8,23 @@
  */
 
 import { drawText, textWidth } from './hudfont.js';
+import { hex } from './palette.js';
 
+/** The HUD draws from the same ramps as the world, so it belongs to it. */
 const PALETTE = {
-  ink: '#f4f9ff',
-  dim: '#7d8f9e',
-  shadow: '#05080c',
-  gold: '#ffcf4c',
-  hp: '#ff3d52',
-  hpLow: '#ff8a3c',
-  energy: '#3fc9ff',
-  panel: 'rgba(6, 10, 14, 0.82)',
-  edge: '#2d4356',
-  bad: '#ff6b6b',
-  good: '#6fe39a',
+  ink: hex('bone', 4),
+  dim: hex('stone', 4),
+  shadow: hex('void', 0),
+  gold: hex('ember', 4),
+  hp: hex('blood', 3),
+  hpLow: hex('ember', 3),
+  hpEmpty: hex('blood', 0),
+  energy: hex('ice', 3),
+  energyEmpty: hex('ice', 0),
+  panel: 'rgba(8, 11, 18, 0.84)',
+  edge: hex('void', 3),
+  bad: hex('blood', 4),
+  good: hex('verdigris', 4),
 };
 
 const BAR_CELLS = 20;
@@ -152,7 +156,7 @@ export class Hud {
       const barX = cx - Math.round(barW / 2);
       const barY = 40;
       drawText(c, state.boss.name, cx, barY, { scale: 1, colour: PALETTE.bad, align: 'center', shadow: PALETTE.shadow });
-      this.segmentBar(barX, barY + 10, barW, 6, state.boss.ratio, PALETTE.bad, '#3a1418');
+      this.segmentBar(barX, barY + 10, barW, 6, state.boss.ratio, PALETTE.bad, PALETTE.hpEmpty);
     }
 
     // --- objective and keys ------------------------------------------------
@@ -184,7 +188,7 @@ export class Hud {
       drawText(c, label, W - 8, 41, { scale: 1, colour: PALETTE.gold, align: 'right', shadow: PALETTE.shadow });
       const trackW = 70;
       const trackX = W - 8 - trackW;
-      c.fillStyle = '#2a2415';
+      c.fillStyle = hex('ember', 0);
       c.fillRect(trackX, 50, trackW, 2);
       c.fillStyle = PALETTE.gold;
       c.fillRect(trackX, 50, Math.round(trackW * (state.comboTimer / state.comboWindow)), 2);
@@ -198,11 +202,11 @@ export class Hud {
     const hpRatio = state.hp / state.maxHp;
     const hpColour = hpRatio < 0.3 ? PALETTE.hpLow : PALETTE.hp;
     drawText(c, 'HULL', 8, barY + 6, { scale: 1, colour: PALETTE.dim });
-    this.segmentBar(8, barY + 16, 132, 8, hpRatio, hpColour, '#33161a');
+    this.segmentBar(8, barY + 16, 132, 8, hpRatio, hpColour, PALETTE.hpEmpty);
     drawText(c, String(Math.ceil(Math.max(0, state.hp))), 146, barY + 15, { scale: 2, colour: hpColour });
 
     drawText(c, 'CHARGE', W - 8, barY + 6, { scale: 1, colour: PALETTE.dim, align: 'right' });
-    this.segmentBar(W - 140, barY + 16, 132, 8, state.energy / state.maxEnergy, PALETTE.energy, '#12303d');
+    this.segmentBar(W - 140, barY + 16, 132, 8, state.energy / state.maxEnergy, PALETTE.energy, PALETTE.energyEmpty);
     drawText(c, String(Math.floor(state.energy)), W - 146, barY + 15,
       { scale: 2, colour: PALETTE.energy, align: 'right' });
 

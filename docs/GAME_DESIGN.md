@@ -72,34 +72,85 @@ Getting lost is not difficulty, it is just tedium. So:
 - the **objective line** always names the next concrete thing to do;
 - each floor has its own **palette and name**, so depth is legible at a glance.
 
-## Presentation
+## Art direction
 
-The whole frame is drawn at **340 pixels tall** and scaled up by the browser with
+The whole frame is drawn at **340 pixels tall** and scaled up with
 nearest-neighbour filtering. The pixels are real, not a shader imitating them —
-which also means the game renders roughly 2.5x fewer fragments than it would at
-native resolution.
+which also means the game renders roughly 2.5x fewer fragments than at native
+resolution.
 
-- **Enemies are sprites.** Upright billboards that rotate about Y only, so a
-  monster stays standing on the floor instead of tipping over when you look down
-  at it. Alpha is cut hard rather than blended, keeping pixel edges crisp and
-  letting sprites use the depth buffer like any other geometry.
-- **The art is code.** `sprites.js` paints every sprite at boot with integer
-  `fillRect` calls onto a canvas, which becomes the atlas texture. There are no
-  binary assets in the repository. `lab-sprites.html` renders the sheet at 6x for
-  working on it.
-- **One set of art covers every state.** Tinting and a slight swell are applied
-  in the shader, so hurt flashes and attack wind-ups need no extra frames — each
-  creature has just a two-frame walk plus an attack pose.
-- **Colour is quantised to 18 levels through a 4x4 ordered dither.** Posterising
-  alone painted concentric contour rings across every flat wall; the dither turns
-  those bands into a pixel pattern that reads as deliberate.
+### One palette, used everywhere
+
+Every colour in the game comes from `palette.js` and nowhere else: sprites,
+masonry, props, HUD, menus. Eight ramps of four or five steps, ~39 colours
+total. This is the single biggest reason the game reads as authored rather than
+assembled — a shared, constrained set forces each new element to be described in
+terms of what already exists, which is exactly the working principle behind
+DawnBringer's classic palettes and the reason art made with them has "an
+attractive sense of consistency".
+
+Each ramp runs dark to light and **shifts hue as it climbs**: shadows lean cool
+toward violet-blue, highlights lean warm toward cream, saturation peaks in the
+midtones. Shading by value alone — just darkening and lightening one colour — is
+the quickest way to make pixel art look flat.
+
+### The rule that keeps things readable
+
+**Walls are drawn from steps 0–3 of their ramp; creatures from steps 2–4 of
+theirs.** A monster is always lighter than the masonry behind it.
+
+This came directly out of a bug. The Emberforge was built of blood-red stone and
+the Warden is a blood-red construct, so the boss dissolved into his own arena.
+The standard check for this is to desaturate a screenshot: if you cannot instantly
+find the character, the values are too close. Dropping the walls to `blood 0`
+fixed it, and the same rule applied to the other three floors caught the same
+latent problem — bone-coloured crawlers on bone-coloured walls in the galleries,
+verdigris sentinels on verdigris walls in the works.
+
+### The cast is one family
+
+Nothing down here is an animal. Every creature is a **bound construct** built
+from the same three materials: a body of pale bone, clamped with bands of
+corroded verdigris metal, animated by an ember core. They differ by silhouette
+and by how much of each material they carry — the Crawler is nearly all bone,
+the Sentinel nearly all metal, the Wraith a shroud over a bone mask, the Warden
+all three at scale.
+
+The shared language does gameplay work as well as aesthetic work: **the glowing
+part is the part you shoot**, and that reads across the entire cast without a
+tutorial.
+
+### Light, outlines and the ember core
+
+- **Light falls from the upper left on every sprite, always.** Consistency here
+  is most of what separates a set of sprites from a pile of them.
+- **Selective outlining**: a lit edge along the top-left, the dark silhouette
+  line along the bottom-right. Locking the shape with a hard dark line where the
+  sprite meets the background while letting the lit side blend is what keeps a
+  sprite readable against both a torch-lit wall and a black floor. In this
+  codebase it is applied by rule in `paintForm`, not by hand, which is why eleven
+  sprites look like one artist drew them.
+- **The ember core is a separate quad** drawn on top of the body with lighting
+  switched off, so it stays visible in an unlit corridor — the 2D equivalent of
+  a rim light for luminance separation. It brightens as a creature winds up,
+  making the aim point and the attack telegraph the same pixel.
+- **Restraint**: at these sizes more colours make noise, not detail. Each sprite
+  uses one shadow tone, one core tone and one highlight from a single ramp, plus
+  the shared verdigris and ember accents.
+
+### Everything else
+
+- **Colour is quantised to 18 levels through a 4x4 ordered dither**, built from
+  two nested 2x2 matrices because GLSL ES 1.0 dislikes array indexing.
+  Posterising alone painted concentric contour rings across every flat wall.
 - **The HUD is drawn as pixels too**, on its own canvas at the same resolution,
-  with a 5x7 bitmap font defined in `hudfont.js`. Doing it in the DOM would have
-  put smooth anti-aliased type on top of a deliberately pixelated game. Bars are
-  segmented into discrete cells, because segments read as a quantity at a glance
-  in a way a smooth fill never does. Scanlines are drawn over everything from the
-  same canvas, which ties the picture together as one screen rather than a game
-  with a UI stuck on top.
+  with a 5x7 bitmap font in `hudfont.js`. Bars are segmented into discrete cells,
+  which read as a quantity at a glance in a way a smooth fill never does.
+  Scanlines are drawn over everything from the same canvas.
+- **The art is code.** `sprites.js` paints every sprite at boot with integer
+  `fillRect` calls onto a canvas that becomes the atlas texture. There are no
+  binary assets in the repository. `lab-sprites.html` is the reference page: the
+  palette with hex values, the full cast, and the rationale.
 
 ## Audio
 

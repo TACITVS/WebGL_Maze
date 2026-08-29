@@ -1,13 +1,29 @@
+/* These are the same values as src/dungeon/palette.js. The menus are part of
+   the same world as the dungeon, so they are built from the same ramps. */
 :root {
   color-scheme: dark;
-  --bg: #04060a;
-  --ink: #f4f9ff;
-  --dim: #7d8f9e;
-  --gold: #ffcf4c;
-  --energy: #3fc9ff;
-  --bad: #ff5d6b;
-  --good: #6fe39a;
-  --edge: #2d4356;
+  --void-0: #080b12;
+  --void-1: #0f1622;
+  --void-3: #2b3a55;
+  --stone-2: #544a52;
+  --stone-4: #8c7c75;
+  --bone-4: #f5e3b8;
+  --verdigris-3: #49a07c;
+  --verdigris-4: #7ad39b;
+  --ember-4: #ffd166;
+  --blood-4: #ff7a7a;
+  --ice-1: #134a63;
+  --ice-2: #1f83a8;
+  --ice-3: #3fc9ff;
+
+  --bg: var(--void-0);
+  --ink: var(--bone-4);
+  --dim: var(--stone-4);
+  --gold: var(--ember-4);
+  --energy: var(--ice-3);
+  --bad: var(--blood-4);
+  --good: var(--verdigris-4);
+  --edge: var(--void-3);
   --mono: "Courier New", ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
@@ -63,8 +79,8 @@ canvas#hudCanvas { pointer-events: none; }
   width: 128px;
   height: 128px;
   border: 2px solid var(--edge);
-  background: #05080b;
-  box-shadow: 0 0 0 2px #05080b;
+  background: var(--void-0);
+  box-shadow: 0 0 0 2px var(--void-0);
   pointer-events: none;
 }
 .mapwrap canvas {
@@ -94,9 +110,9 @@ canvas#hudCanvas { pointer-events: none; }
   position: relative;
   width: min(620px, 92vw);
   padding: 26px 30px;
-  background: #080d13;
+  background: var(--void-1);
   border: 2px solid var(--edge);
-  box-shadow: 0 0 0 2px #04070a, 0 0 0 4px var(--edge), 0 18px 60px rgba(0, 0, 0, 0.8);
+  box-shadow: 0 0 0 2px var(--void-0), 0 0 0 4px var(--edge), 0 18px 60px rgba(0, 0, 0, 0.8);
 }
 .panel.small { width: min(400px, 92vw); text-align: center; }
 
@@ -107,7 +123,7 @@ canvas#hudCanvas { pointer-events: none; }
   letter-spacing: 0.18em;
   line-height: 1;
   color: var(--ink);
-  text-shadow: 3px 3px 0 #0a1b2a, 6px 6px 0 rgba(63, 201, 255, 0.22);
+  text-shadow: 3px 3px 0 var(--void-0), 6px 6px 0 rgba(63, 201, 255, 0.25);
 }
 .tag {
   margin: 0 0 18px;
@@ -122,7 +138,7 @@ h2 {
   font-size: 24px;
   letter-spacing: 0.22em;
   font-weight: 700;
-  text-shadow: 2px 2px 0 #0a1b2a;
+  text-shadow: 2px 2px 0 var(--void-0);
 }
 
 .cols { display: flex; gap: 26px; flex-wrap: wrap; border-top: 2px solid var(--edge); padding-top: 14px; }
@@ -140,9 +156,9 @@ h2 {
 kbd {
   display: inline-block;
   min-width: 16px; padding: 1px 4px; margin-right: 2px;
-  border: 1px solid #46617a;
-  background: #12202c;
-  font: inherit; font-size: 10px; color: #cfe2f0;
+  border: 1px solid var(--void-3);
+  background: var(--void-1);
+  font: inherit; font-size: 10px; color: var(--ink);
 }
 
 .startRow {
@@ -150,21 +166,21 @@ kbd {
   margin-top: 18px; justify-content: center;
 }
 button, input {
-  background: #12202c;
+  background: var(--void-1);
   color: var(--ink);
-  border: 2px solid #3a5468;
+  border: 2px solid var(--void-3);
   padding: 9px 14px;
   font: inherit; font-size: 12px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 button { cursor: pointer; font-weight: 700; }
-button:hover { border-color: var(--energy); color: var(--energy); }
+button:hover { border-color: var(--energy); color: var(--energy); background: #12283a; }
 button:active { transform: translate(1px, 1px); }
 .primary { background: #123d55; border-color: var(--energy); color: #d8f4ff; }
-.primary:hover { background: #17506f; }
+.primary:hover { background: var(--ice-2); color: var(--void-0); }
 input { width: 110px; }
-input::placeholder { color: #4d6274; }
+input::placeholder { color: var(--stone-2); }
 label { font-size: 11px; color: var(--dim); letter-spacing: 0.14em; }
 
 .hintKey {
@@ -172,13 +188,13 @@ label { font-size: 11px; color: var(--dim); letter-spacing: 0.14em; }
   padding: 0 3px; margin-left: 5px;
 }
 
-.overTitle.bad { color: var(--bad); text-shadow: 2px 2px 0 #2a0509; }
-.overTitle.good { color: var(--good); text-shadow: 2px 2px 0 #04240f; }
+.overTitle.bad { color: var(--bad); text-shadow: 2px 2px 0 #2e0b14; }
+.overTitle.good { color: var(--good); text-shadow: 2px 2px 0 #122a2a; }
 
 .stats { margin: 16px 0 4px; font-size: 11px; letter-spacing: 0.1em; }
 .statRow {
   display: flex; justify-content: space-between; padding: 6px 2px;
-  border-bottom: 1px solid #17242f;
+  border-bottom: 1px solid var(--void-1);
 }
 .statRow span { color: var(--dim); }
 .statRow b { color: var(--ink); }

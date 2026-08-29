@@ -69,6 +69,7 @@ export class Swarm {
     this.flowFloor = -1;
     this.aggroCount = 0;
     this.boss = null;
+    this.clock = 0;
   }
 
   /* ------------------------------ spawning ----------------------------- */
@@ -326,6 +327,7 @@ export class Swarm {
   /* ------------------------------ update ------------------------------- */
 
   update(dt, player, hooks) {
+    this.clock += dt;
     const playerFloor = this.physics.floorAt(player.y);
     this.flowAge -= dt;
     if (this.flowAge <= 0 || this.flowFloor !== playerFloor) {
@@ -578,21 +580,29 @@ export class Swarm {
       const frame = frames.get(`${enemy.kind}${winding ? 2 : step}`) || frames.get(`${enemy.kind}0`);
       if (!frame) continue;
       const flash = enemy.hurtFlash > 0;
-      const tint = flash
-        ? [2.4, 2.2, 2.2]
-        : [1 + tell * 1.1, 1 - tell * 0.25, 1 - tell * 0.35];
+      const tint = flash ? [2.4, 2.2, 2.2] : [1, 1, 1];
       // Swelling on the wind-up reads even in peripheral vision.
       const height = type.height * (1 + tell * 0.12);
-      out.push({
-        x: enemy.x,
-        y: enemy.y + Math.sin(enemy.bob) * 0.03,
-        z: enemy.z,
-        h: height,
-        w: height * frame.aspect,
-        frame,
-        tint,
-        emissive: flash ? 0.75 : tell * 0.45,
-      });
+      const y = enemy.y + Math.sin(enemy.bob) * 0.03;
+      const w = height * frame.aspect;
+      out.push({ x: enemy.x, y, z: enemy.z, h: height, w, frame, tint, emissive: flash ? 0.7 : 0 });
+
+      // The ember core rides as a second, unlit quad. It is the one part of a
+      // creature that stays visible in a black corridor, and it brightens as the
+      // thing winds up - so the telegraph and the aim point are the same pixel.
+      const glowName = winding && frames.has(`${enemy.kind}Glow2`)
+        ? `${enemy.kind}Glow2`
+        : `${enemy.kind}Glow`;
+      const glow = frames.get(glowName);
+      if (glow) {
+        const heat = 1 + tell * 1.4;
+        out.push({
+          x: enemy.x, y, z: enemy.z, h: height, w,
+          frame: glow,
+          tint: [heat, heat * 0.92, heat * 0.8],
+          emissive: 1,
+        });
+      }
     }
 
     const shot = frames.get('shot');
@@ -622,6 +632,21 @@ export class Swarm {
       if (!frame) continue;
       const lift = 0.35 + Math.sin(item.bob) * 0.10;
       out.push({ x: item.x, y: item.y + lift, z: item.z, w: 0.5, h: 0.5, frame, tint: [1, 1, 1], emissive: 0.85 });
+    }
+
+    const keyFrame = frames.get('key');
+    if (keyFrame) {
+      for (const prop of this.dungeon.props) {
+        if (prop.kind !== 'key' || prop.taken) continue;
+        const lift = 0.45 + Math.sin(this.clock * 2 + prop.x) * 0.09;
+        out.push({
+          x: prop.x, y: prop.y + lift, z: prop.z,
+          h: 0.6, w: 0.6 * keyFrame.aspect,
+          frame: keyFrame,
+          tint: [prop.color[0] * 1.5, prop.color[1] * 1.5, prop.color[2] * 1.5],
+          emissive: 1,
+        });
+      }
     }
 
     return out;

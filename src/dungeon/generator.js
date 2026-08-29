@@ -16,6 +16,7 @@
 
 import { RNG } from './rng.js';
 import { TILE, TILE_SIZE, DIRS, FloorPlan, floodFill, connectedWithout } from './grid.js';
+import { rgb } from './palette.js';
 
 /** Tile footprint of a stair tower: 3 tiles across the flights, 4 along them. */
 export const SHAFT_ACROSS = 3;
@@ -39,15 +40,46 @@ export const SOLID_PROP_KINDS = new Set([
   'pillar', 'crate', 'shelf', 'sarcophagus', 'altar', 'chest', 'brazier',
 ]);
 
-/** Per floor palettes, so descending actually looks like descending. */
+/**
+ * Per floor palettes, so descending actually looks like descending.
+ *
+ * Each floor is a different pair of ramps from the shared palette rather than a
+ * fresh set of colours: depth 1 is stone over a drowned verdigris floor, depth 2
+ * trades the walls for bone, depth 3 corrodes them, and the Emberforge burns.
+ * Floors stay several steps darker than walls, which is what keeps a lit room
+ * from flattening into one tone.
+ */
 const THEMES = [
-  // Floors are kept notably darker and cooler than walls: without that contrast
-  // a torch-lit room flattens into one brown smear.
-  { name: 'Flooded undercroft', floor: [0.15, 0.20, 0.23], wall: [0.42, 0.41, 0.37], ceiling: [0.08, 0.10, 0.12], accent: [0.24, 0.62, 0.66], light: [1.00, 0.72, 0.38] },
-  { name: 'Bone galleries', floor: [0.20, 0.19, 0.17], wall: [0.52, 0.48, 0.40], ceiling: [0.10, 0.09, 0.09], accent: [0.72, 0.64, 0.40], light: [1.00, 0.66, 0.30] },
-  { name: 'Verdigris works', floor: [0.13, 0.19, 0.19], wall: [0.34, 0.44, 0.40], ceiling: [0.07, 0.10, 0.10], accent: [0.26, 0.72, 0.56], light: [0.62, 0.94, 0.78] },
-  { name: 'Emberforge', floor: [0.19, 0.14, 0.13], wall: [0.46, 0.34, 0.28], ceiling: [0.11, 0.07, 0.06], accent: [0.86, 0.38, 0.20], light: [1.00, 0.55, 0.22] },
-  { name: 'Obsidian sanctum', floor: [0.12, 0.12, 0.16], wall: [0.30, 0.29, 0.38], ceiling: [0.07, 0.07, 0.10], accent: [0.54, 0.40, 0.82], light: [0.72, 0.60, 1.00] },
+  // The rule that keeps every creature readable: walls sit at step 1-3 of their
+  // ramp, creatures at step 2-4 of theirs. A monster is always lighter than the
+  // masonry behind it, so it never disappears into a wall of its own colour -
+  // which is exactly what an Emberforge built of blood-red stone did to the
+  // blood-red Warden before this rule existed.
+  {
+    name: 'Flooded undercroft',
+    floor: rgb('verdigris', 0), wall: rgb('stone', 3), ceiling: rgb('void', 1),
+    accent: rgb('verdigris', 3), light: rgb('ember', 4),
+  },
+  {
+    name: 'Bone galleries',
+    floor: rgb('stone', 0), wall: rgb('bone', 1), ceiling: rgb('void', 1),
+    accent: rgb('bone', 4), light: rgb('ember', 3),
+  },
+  {
+    name: 'Verdigris works',
+    floor: rgb('void', 0), wall: rgb('verdigris', 1), ceiling: rgb('void', 1),
+    accent: rgb('verdigris', 4), light: rgb('ice', 4),
+  },
+  {
+    name: 'Emberforge',
+    floor: rgb('ember', 0), wall: rgb('blood', 0), ceiling: rgb('void', 0),
+    accent: rgb('ember', 3), light: rgb('ember', 4),
+  },
+  {
+    name: 'Obsidian sanctum',
+    floor: rgb('void', 1), wall: rgb('arcane', 1), ceiling: rgb('void', 0),
+    accent: rgb('arcane', 3), light: rgb('arcane', 4),
+  },
 ];
 
 /**

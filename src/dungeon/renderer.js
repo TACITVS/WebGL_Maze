@@ -523,6 +523,10 @@ export class Renderer {
       const forward = [-toEye[0] / len, -toEye[1] / len];
       const right = [-forward[1], 0, forward[0]];
       this.sprites.upload(this.spriteList, right);
+      // Glow layers sit exactly on top of the body quad they belong to, so equal
+      // depths have to pass or the core never draws. Restored afterwards, since
+      // the world has coincident faces that rely on a strict test.
+      g.depthFunc(g.LEQUAL);
       g.useProgram(this.spriteProgram);
       this.applyUniforms(this.spriteLoc, vp, eye);
       g.activeTexture(g.TEXTURE0);
@@ -530,6 +534,7 @@ export class Renderer {
       g.uniform1i(this.spriteLoc.atlas, 0);
       g.uniform3fv(this.spriteLoc.facing, new Float32Array([-forward[0], 0, -forward[1]]));
       this.sprites.draw(this.spriteLoc);
+      g.depthFunc(g.LESS);
     }
   }
 }
