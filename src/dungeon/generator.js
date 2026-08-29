@@ -16,6 +16,7 @@
 
 import { RNG } from './rng.js';
 import { TILE, TILE_SIZE, DIRS, FloorPlan, floodFill, connectedWithout } from './grid.js';
+import { rgb } from './palette.js';
 
 /** Tile footprint of a stair tower: 3 tiles across the flights, 4 along them. */
 export const SHAFT_ACROSS = 3;
@@ -39,13 +40,46 @@ export const SOLID_PROP_KINDS = new Set([
   'pillar', 'crate', 'shelf', 'sarcophagus', 'altar', 'chest', 'brazier',
 ]);
 
-/** Per floor palettes, so descending actually looks like descending. */
+/**
+ * Per floor palettes, so descending actually looks like descending.
+ *
+ * Each floor is a different pair of ramps from the shared palette rather than a
+ * fresh set of colours: depth 1 is stone over a drowned verdigris floor, depth 2
+ * trades the walls for bone, depth 3 corrodes them, and the Emberforge burns.
+ * Floors stay several steps darker than walls, which is what keeps a lit room
+ * from flattening into one tone.
+ */
 const THEMES = [
-  { name: 'Flooded undercroft', floor: [0.30, 0.33, 0.34], wall: [0.35, 0.34, 0.31], ceiling: [0.17, 0.19, 0.20], accent: [0.24, 0.52, 0.55], light: [1.00, 0.72, 0.38] },
-  { name: 'Bone galleries', floor: [0.34, 0.32, 0.28], wall: [0.40, 0.37, 0.31], ceiling: [0.19, 0.18, 0.17], accent: [0.62, 0.55, 0.36], light: [1.00, 0.66, 0.30] },
-  { name: 'Verdigris works', floor: [0.26, 0.31, 0.30], wall: [0.30, 0.35, 0.33], ceiling: [0.15, 0.18, 0.18], accent: [0.24, 0.60, 0.48], light: [0.62, 0.94, 0.78] },
-  { name: 'Emberforge', floor: [0.33, 0.27, 0.25], wall: [0.38, 0.29, 0.25], ceiling: [0.20, 0.15, 0.14], accent: [0.72, 0.34, 0.20], light: [1.00, 0.55, 0.22] },
-  { name: 'Obsidian sanctum', floor: [0.24, 0.24, 0.29], wall: [0.27, 0.26, 0.33], ceiling: [0.14, 0.14, 0.18], accent: [0.48, 0.36, 0.72], light: [0.72, 0.60, 1.00] },
+  // The rule that keeps every creature readable: walls sit at step 1-3 of their
+  // ramp, creatures at step 2-4 of theirs. A monster is always lighter than the
+  // masonry behind it, so it never disappears into a wall of its own colour -
+  // which is exactly what an Emberforge built of blood-red stone did to the
+  // blood-red Warden before this rule existed.
+  {
+    name: 'Flooded undercroft',
+    floor: rgb('verdigris', 0), wall: rgb('stone', 3), ceiling: rgb('void', 1),
+    accent: rgb('verdigris', 3), light: rgb('ember', 4),
+  },
+  {
+    name: 'Bone galleries',
+    floor: rgb('stone', 0), wall: rgb('bone', 1), ceiling: rgb('void', 1),
+    accent: rgb('bone', 4), light: rgb('ember', 3),
+  },
+  {
+    name: 'Verdigris works',
+    floor: rgb('void', 0), wall: rgb('verdigris', 1), ceiling: rgb('void', 1),
+    accent: rgb('verdigris', 4), light: rgb('ice', 4),
+  },
+  {
+    name: 'Emberforge',
+    floor: rgb('ember', 0), wall: rgb('blood', 0), ceiling: rgb('void', 0),
+    accent: rgb('ember', 3), light: rgb('ember', 4),
+  },
+  {
+    name: 'Obsidian sanctum',
+    floor: rgb('void', 1), wall: rgb('arcane', 1), ceiling: rgb('void', 0),
+    accent: rgb('arcane', 3), light: rgb('arcane', 4),
+  },
 ];
 
 /**
@@ -645,7 +679,7 @@ function furnish(rng, dungeon) {
     const perimeter = rng.shuffle(room.perimeterTiles(plan));
 
     // Torches: the main light source, and the reason the dungeon reads as 3D.
-    const torchCount = Math.max(1, Math.min(4, Math.round(room.area / 34)));
+    const torchCount = Math.max(2, Math.min(5, Math.round(room.area / 26)));
     for (let i = 0; i < torchCount && i < perimeter.length; i += 1) {
       const [x, z, dir] = perimeter[i * 2 % perimeter.length];
       const wx = (x + 0.5 + dir.dx * 0.34) * TILE_SIZE;
@@ -723,7 +757,7 @@ function furnish(rng, dungeon) {
         const tile = plan.get(x, z);
         if (tile !== TILE.CORRIDOR) continue;
         // A sconce every few tiles, on a stretch that actually has a wall.
-        if (((x * 7 + z * 13) % 5) !== 0) continue;
+        if (((x * 7 + z * 13) % 4) !== 0) continue;
         const wall = DIRS.find((d) => plan.get(x + d.dx, z + d.dz) === TILE.ROCK);
         if (!wall) continue;
         const wx = (x + 0.5 + wall.dx * 0.34) * TILE_SIZE;

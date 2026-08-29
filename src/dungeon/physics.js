@@ -112,9 +112,9 @@ export class DungeonPhysics {
   }
 
   /** True when the body at (x, z, feetY) overlaps rock, furniture or a locked door. */
-  blocked(x, z, feetY, support) {
+  blocked(x, z, feetY, support, radius = PLAYER_RADIUS, height = PLAYER_HEIGHT) {
     const bodyMin = feetY + 0.05;
-    const bodyMax = feetY + PLAYER_HEIGHT;
+    const bodyMax = feetY + height;
     for (const door of this.doors) {
       if (door.open) continue;
       const b = door.box;
@@ -123,7 +123,7 @@ export class DungeonPhysics {
       if (bodyMax <= bMin || bodyMin >= bMax) continue;
       const qx = Math.max(b.c[0] - b.h[0], Math.min(x, b.c[0] + b.h[0]));
       const qz = Math.max(b.c[2] - b.h[2], Math.min(z, b.c[2] + b.h[2]));
-      if (Math.hypot(x - qx, z - qz) < PLAYER_RADIUS) return true;
+      if (Math.hypot(x - qx, z - qz) < radius) return true;
     }
     for (const b of this.lookup(this.blockerIndex, x, z)) {
       const bMin = b.c[1] - b.h[1];
@@ -131,7 +131,7 @@ export class DungeonPhysics {
       if (bodyMax <= bMin || bodyMin >= bMax) continue;
       const qx = Math.max(b.c[0] - b.h[0], Math.min(x, b.c[0] + b.h[0]));
       const qz = Math.max(b.c[2] - b.h[2], Math.min(z, b.c[2] + b.h[2]));
-      if (Math.hypot(x - qx, z - qz) < PLAYER_RADIUS) return true;
+      if (Math.hypot(x - qx, z - qz) < radius) return true;
     }
     // Rock only blocks while standing on a floor tile. On a staircase the tower
     // casing is what confines the player, and an open stairwell is a hole rather
@@ -147,7 +147,7 @@ export class DungeonPhysics {
         if (plan.get(tx, tz) !== TILE.ROCK) continue;
         const qx = Math.max(tx * TILE_SIZE, Math.min(x, (tx + 1) * TILE_SIZE));
         const qz = Math.max(tz * TILE_SIZE, Math.min(z, (tz + 1) * TILE_SIZE));
-        if (Math.hypot(x - qx, z - qz) < PLAYER_RADIUS) return true;
+        if (Math.hypot(x - qx, z - qz) < radius) return true;
       }
     }
     return false;
@@ -159,16 +159,16 @@ export class DungeonPhysics {
    * fill above all - key on `support.id` rather than on the height, because a
    * stair tread and the landing above it can sit only centimetres apart.
    */
-  occupancy(x, z, currentY, expectedY = null) {
+  occupancy(x, z, currentY, expectedY = null, radius = PLAYER_RADIUS, height = PLAYER_HEIGHT) {
     const support = this.support(x, z, currentY, expectedY);
     if (!support) return null;
-    if (this.blocked(x, z, support.y, support)) return null;
+    if (this.blocked(x, z, support.y, support, radius, height)) return null;
     return support;
   }
 
-  /** Height the player would stand at, or null if the position is unusable. */
-  canOccupy(x, z, currentY, expectedY = null) {
-    const support = this.occupancy(x, z, currentY, expectedY);
+  /** Height the body would stand at, or null if the position is unusable. */
+  canOccupy(x, z, currentY, expectedY = null, radius = PLAYER_RADIUS, height = PLAYER_HEIGHT) {
+    const support = this.occupancy(x, z, currentY, expectedY, radius, height);
     return support ? support.y : null;
   }
 
@@ -176,30 +176,67 @@ export class DungeonPhysics {
    * Advance the player, sliding along whatever it cannot pass. Sub-stepping
    * keeps fast movement from tunnelling through thin walls.
    */
-  move(player, dx, dz) {
+  move(body, dx, dz, radius = PLAYER_RADIUS, height = PLAYER_HEIGHT) {
     const distance = Math.hypot(dx, dz);
-    if (distance < 1e-9) return;
+    if (distance < 1e-9) return false;
     const steps = Math.max(1, Math.ceil(distance / 0.06));
     const sx = dx / steps;
     const sz = dz / steps;
+    let movedAny = false;
     for (let i = 0; i < steps; i += 1) {
       const tryMove = (mx, mz) => {
         if (Math.abs(mx) + Math.abs(mz) < 1e-9) return false;
-        const y = this.canOccupy(player.x + mx, player.z + mz, player.y);
+        const y = this.canOccupy(body.x + mx, body.z + mz, body.y, null, radius, height);
         if (y === null) return false;
-        player.x += mx;
-        player.z += mz;
-        player.y = y;
+        body.x += mx;
+        body.z += mz;
+        body.y = y;
         return true;
       };
-      if (tryMove(sx, sz)) continue;
+      if (tryMove(sx, sz)) { movedAny = true; continue; }
       // Try each axis on its own so walls slide instead of sticking.
       if (Math.abs(sx) >= Math.abs(sz)) {
-        if (!tryMove(sx, 0)) tryMove(0, sz);
-      } else if (!tryMove(0, sz)) {
-        tryMove(sx, 0);
+        if (tryMove(sx, 0) || tryMove(0, sz)) movedAny = true;
+      } else if (tryMove(0, sz) || tryMove(sx, 0)) {
+        movedAny = true;
       }
     }
+    return movedAny;
+  }
+
+  /**
+   * Is the straight line between two points clear of solid rock?
+   *
+   * Shots and enemy sight lines both need this. It walks the segment in short
+   * steps and asks the tile map, which is cheap and exactly matches the walls
+   * the compiler drew.
+   */
+  rayClear(from, to) {
+    const dx = to[0] - from[0];
+    const dy = to[1] - from[1];
+    const dz = to[2] - from[2];
+    const length = Math.hypot(dx, dy, dz);
+    if (length < 1e-6) return true;
+    const steps = Math.ceil(length / 0.3);
+    for (let i = 1; i <= steps; i += 1) {
+      const t = i / steps;
+      const x = from[0] + dx * t;
+      const y = from[1] + dy * t;
+      const z = from[2] + dz * t;
+      const plan = this.dungeon.floors[this.floorAt(y)];
+      if (!plan) continue;
+      const tx = Math.floor(x / TILE_SIZE);
+      const tz = Math.floor(z / TILE_SIZE);
+      if (plan.get(tx, tz) === TILE.ROCK) return false;
+      // A closed door stops a shot as surely as a wall does.
+      for (const door of this.doors) {
+        if (door.open) continue;
+        const b = door.box;
+        if (Math.abs(x - b.c[0]) <= b.h[0] && Math.abs(z - b.c[2]) <= b.h[2]
+          && y >= b.c[1] - b.h[1] && y <= b.c[1] + b.h[1]) return false;
+      }
+    }
+    return true;
   }
 
   /** Index of the floor whose elevation the player is standing closest to. */
