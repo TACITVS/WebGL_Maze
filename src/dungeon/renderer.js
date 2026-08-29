@@ -43,7 +43,7 @@ void main() {
 
   vec3 lit = vC * uAmbient;
   // Headlamp: keeps the player from being blind between torches.
-  lit += vC * max(dot(N, E), 0.0) * 0.30 / (1.0 + dEye * dEye * 0.05);
+  lit += vC * max(dot(N, E), 0.0) * 0.20 / (1.0 + dEye * dEye * 0.06);
 
   for (int i = 0; i < ${MAX_LIGHTS}; i++) {
     vec3 delta = uLightPos[i] - vW;
@@ -53,7 +53,7 @@ void main() {
     lit += vC * uLightColor[i] * (0.25 + 0.75 * lambert) * atten;
   }
   // Keep torchlight from blowing out surfaces the player is standing against.
-  lit = lit / (1.0 + 0.42 * max(max(lit.r, lit.g), lit.b));
+  lit = lit / (1.0 + 0.62 * max(max(lit.r, lit.g), lit.b));
 
   // Emissive surfaces (flames, keys, wards) ignore the lighting entirely.
   lit = mix(lit, vC * 1.15, vE);
@@ -77,6 +77,28 @@ export class Mesh {
       const [hx, hy, hz] = b.h;
       const c = b.color;
       const e = b.emissive || 0;
+      if (b.basis) {
+        // Oriented box: the corners are built in the box's own frame, which is
+        // what lets a held weapon keep its shape however the camera turns.
+        const [bx, by, bz] = b.basis;
+        const corner = (sx, sy, sz) => [
+          cx + bx[0] * hx * sx + by[0] * hy * sy + bz[0] * hz * sz,
+          cy + bx[1] * hx * sx + by[1] * hy * sy + bz[1] * hz * sz,
+          cz + bx[2] * hx * sx + by[2] * hy * sy + bz[2] * hz * sz,
+        ];
+        const neg = (v) => [-v[0], -v[1], -v[2]];
+        const face = (normal, s0, s1, s2, s3) => {
+          const q = [corner(...s0), corner(...s1), corner(...s2), corner(...s3)];
+          for (const idx of [0, 1, 2, 0, 2, 3]) push(q[idx], normal, c, e);
+        };
+        face(by, [-1, 1, -1], [1, 1, -1], [1, 1, 1], [-1, 1, 1]);
+        face(neg(by), [-1, -1, 1], [1, -1, 1], [1, -1, -1], [-1, -1, -1]);
+        face(bz, [-1, -1, 1], [-1, 1, 1], [1, 1, 1], [1, -1, 1]);
+        face(neg(bz), [1, -1, -1], [1, 1, -1], [-1, 1, -1], [-1, -1, -1]);
+        face(bx, [1, -1, 1], [1, 1, 1], [1, 1, -1], [1, -1, -1]);
+        face(neg(bx), [-1, -1, -1], [-1, 1, -1], [-1, 1, 1], [-1, -1, 1]);
+        continue;
+      }
       const l = cx - hx; const r = cx + hx;
       const d = cy - hy; const t = cy + hy;
       const n = cz - hz; const f = cz + hz;
@@ -162,6 +184,8 @@ export class Renderer {
     this.lights = [];
     this.time = 0;
     this.orbit = { yaw: 0.7, pitch: 0.85, distance: 78, target: [40, -7, 40] };
+    this.transient = [];
+    this.shake = 0;
     this.initGL();
     this.resize();
   }
@@ -201,6 +225,8 @@ export class Renderer {
     this.world = new Mesh(g);
     this.cutaway = new Mesh(g);
     this.overlay = new Mesh(g);
+    // Rebuilt every frame: enemies, shots, sparks, pickups.
+    this.dynamic = new Mesh(g);
     g.enable(g.DEPTH_TEST);
     g.disable(g.CULL_FACE);
     g.clearColor(0.012, 0.014, 0.018, 1);
@@ -237,6 +263,20 @@ export class Renderer {
     this.overlay.upload(boxes || []);
   }
 
+  /** Per-frame geometry. Small enough that re-uploading it costs nothing. */
+  setDynamic(boxes) {
+    this.dynamic.upload(boxes || []);
+  }
+
+  /**
+   * Lights that only exist for this frame - muzzle flashes, flying shots, the
+   * glow of a monster winding up. They compete with the torches for the eight
+   * slots, so the nearest still win.
+   */
+  setTransientLights(lights) {
+    this.transient = lights || [];
+  }
+
   resize() {
     const rect = this.canvas.getBoundingClientRect();
     const ratio = window.devicePixelRatio || 1;
@@ -253,6 +293,12 @@ export class Renderer {
       const d = (light.pos[0] - eye[0]) ** 2 + (light.pos[1] - eye[1]) ** 2 + (light.pos[2] - eye[2]) ** 2;
       if (d > 900) continue;
       near.push({ light, d });
+    }
+    for (const light of this.transient || []) {
+      const d = (light.pos[0] - eye[0]) ** 2 + (light.pos[1] - eye[1]) ** 2 + (light.pos[2] - eye[2]) ** 2;
+      if (d > 900) continue;
+      // Transient lights are the reason you look up, so bias them forward.
+      near.push({ light: { pos: light.pos, color: light.colour || light.color, intensity: light.intensity }, d: d * 0.35 });
     }
     near.sort((a, b) => a.d - b.d);
     for (let i = 0; i < MAX_LIGHTS; i += 1) {
@@ -274,7 +320,7 @@ export class Renderer {
       this.lightColor[i * 3] = light.color[0];
       this.lightColor[i * 3 + 1] = light.color[1];
       this.lightColor[i * 3 + 2] = light.color[2];
-      this.lightPower[i] = light.intensity * flicker * 2.2;
+      this.lightPower[i] = light.intensity * flicker * 1.9;
     }
     const g = this.gl;
     g.uniform3fv(this.loc.lightPos, this.lightPos);
@@ -289,8 +335,12 @@ export class Renderer {
 
     let eye;
     let target;
+    const shake = this.shake || 0;
+    const jitter = shake > 0
+      ? [(Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake]
+      : [0, 0, 0];
     if (this.mode === 'fps') {
-      eye = [player.x, player.y + player.eye, player.z];
+      eye = [player.x + jitter[0], player.y + player.eye + jitter[1], player.z + jitter[2]];
       const cp = Math.cos(player.pitch);
       target = [
         eye[0] + Math.sin(player.yaw) * cp,
@@ -319,6 +369,7 @@ export class Renderer {
     this.uploadLights(eye, dt);
 
     (this.mode === 'fps' ? this.world : this.cutaway).draw(this.loc);
+    this.dynamic.draw(this.loc);
     this.overlay.draw(this.loc);
   }
 }

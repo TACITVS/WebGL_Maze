@@ -3,81 +3,125 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Nexus Depths — 3D Roguelike Dungeon Generator</title>
-  <link rel="stylesheet" href="./styles/dungeon.css" />
+  <title>Nexus Depths</title>
+  <link rel="stylesheet" href="./styles/game.css" />
 </head>
 <body>
-  <div class="app">
-    <section class="main">
-      <div class="toolbar">
-        <div class="brand">Nexus Depths · procedural 3D dungeon</div>
-        <label>Seed <input id="seed" type="number" value="31337" style="width:96px" /></label>
-        <button id="regen" class="primary">Generate</button>
-        <button id="reroll">Random seed</button>
-        <button id="mode">Cutaway view</button>
-        <button id="solution">Show route</button>
-        <button id="autowalk">Auto-walk</button>
-        <button id="validate">Validate</button>
-        <label title="Mouse-look sensitivity">Mouse
-          <input id="sensitivity" type="range" min="0.4" max="2.4" step="0.05" value="1" style="width:80px;vertical-align:middle" />
-        </label>
-        <label title="Reverse vertical mouse look"><input id="invertY" type="checkbox" /> Invert Y</label>
-      </div>
+  <div class="stage">
+    <canvas id="gl"></canvas>
 
-      <div class="viewport" id="viewport">
-        <canvas id="gl"></canvas>
-        <div class="cross" id="cross"></div>
+    <!-- combat feedback layers -->
+    <div id="damageFlash" class="damageFlash"></div>
+    <div id="lowHp" class="lowHp"></div>
+
+    <div id="hud" class="hud hidden">
+      <div class="cross" id="cross"></div>
+      <div class="hitmark" id="hitmark"></div>
+
+      <div class="compassRail"><div class="compass" id="compass">▲</div></div>
+
+      <div class="topLeft">
         <div class="objective" id="objective"></div>
-        <div class="mapwrap"><canvas id="map"></canvas></div>
-        <div class="hud" id="hud">Click the view to capture the mouse · WASD move · Shift run · M cutaway · Esc release</div>
+        <div class="keys" id="keys"></div>
       </div>
 
-      <div class="status" id="status"></div>
-    </section>
-
-    <aside class="side">
-      <h2>Dungeon invariants</h2>
-      <div class="checks" id="checks"></div>
-
-      <h3>How the layout is made</h3>
-      <div class="copy">
-        Each floor is a tile map. A <strong>BSP partition</strong> chops it into uneven leaves, a room of random
-        size and shape is carved into most of them, and a few leaves stay solid rock so the floor has
-        negative space. A <strong>minimum spanning tree</strong> over the room centres becomes corridors,
-        plus extra links so the dungeon has loops rather than being one branching tree.
+      <div class="topRight">
+        <div class="scoreBox">
+          <div class="scoreLabel">SCORE</div>
+          <div class="scoreValue" id="score">0</div>
+          <div class="combo" id="combo"></div>
+          <div class="comboTrack"><div class="comboBar" id="comboBar"></div></div>
+        </div>
       </div>
 
-      <h3>The third dimension</h3>
-      <div class="copy">
-        Floors are stitched together by <strong>switchback stair towers</strong>, dropped wherever a room on one
-        floor overlaps a room on the next. A tower punches a stairwell through the upper floor, stands
-        as a walled tower on the lower one, and is entered only through its mouth. Placement is rejected
-        unless both floors stay fully connected without routing through the tower.
+      <div class="mapwrap"><canvas id="map"></canvas></div>
+
+      <div class="bossBar hidden" id="bossBar">
+        <div class="bossName">THE WARDEN</div>
+        <div class="bossTrack"><div class="bossFill" id="bossFill"></div></div>
       </div>
 
-      <h3>Making it a dungeon</h3>
-      <div class="copy">
-        Rooms are typed from their size and their place in the graph — entrance, vaults on dead ends,
-        crypts, cisterns, a boss chamber at the deepest point — and furnished accordingly. Locks are
-        placed only on <strong>bridges of the room graph</strong>, and each key is hidden in the region still
-        reachable without it, so every dungeon is solvable by construction.
+      <div class="toast" id="toast"></div>
+
+      <div class="banner" id="banner">
+        <div class="bannerTitle" id="bannerTitle"></div>
+        <div class="bannerSub" id="bannerSub"></div>
       </div>
 
-      <h3>Validation</h3>
-      <div class="copy">
-        The checks above do not trust the generator. They flood-fill the compiled world with the same
-        collision query the player's own movement uses, so a pass means a person can really walk from
-        the entrance to the goal — not merely that a hand-drawn centreline happens to be supported.
+      <div class="bottomBar">
+        <div class="vital">
+          <div class="vitalLabel">HULL</div>
+          <div class="track"><div class="fill hp" id="hpFill"></div></div>
+          <div class="vitalValue" id="hpText">120</div>
+        </div>
+        <div class="depthBox">
+          <div class="vitalLabel">DEPTH</div>
+          <div class="depthValue" id="depth">1/4</div>
+        </div>
+        <div class="vital">
+          <div class="vitalLabel">CHARGE</div>
+          <div class="track"><div class="fill energy" id="energyFill"></div></div>
+          <div class="vitalValue" id="energyText">100</div>
+        </div>
       </div>
+    </div>
 
-      <h3>Diagnostics</h3>
-      <div class="log" id="log"></div>
-    </aside>
+    <!-- title -->
+    <div class="screen" id="titleScreen">
+      <div class="panel">
+        <h1 class="logo">NEXUS <span>DEPTHS</span></h1>
+        <p class="tag">Four floors down. One way out. Everything between you and it is awake.</p>
+
+        <div class="controls">
+          <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> sprint</div>
+          <div><b>Left click</b> pulse · <b>Right click</b> / <kbd>Space</kbd> blast</div>
+          <div><kbd>Esc</kbd> pause · mouse to look</div>
+        </div>
+
+        <div class="brief">
+          <div><b>Objective</b> — descend to depth 4 and destroy the Warden.</div>
+          <div><b>Keys</b> unlock the doors barring the way down. The compass points to the next one.</div>
+          <div><b>Chain kills</b> within four seconds to build a score multiplier up to ×5.</div>
+        </div>
+
+        <div class="startRow">
+          <label>Seed <input id="seedInput" type="number" placeholder="random" style="width:110px" /></label>
+          <button id="startBtn" class="primary">Descend</button>
+          <button id="randomBtn">Random run</button>
+          <button id="muteBtn">Sound: on</button>
+        </div>
+        <div class="bestLine">Best score: <b id="bestScore">—</b></div>
+      </div>
+    </div>
+
+    <!-- pause -->
+    <div class="screen hidden" id="pauseScreen">
+      <div class="panel small">
+        <h2>PAUSED</h2>
+        <p class="tag">The dungeon waits.</p>
+        <div class="startRow">
+          <button id="resumeBtn" class="primary">Resume</button>
+          <button id="quitBtn">Abandon run</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- death / victory -->
+    <div class="screen hidden" id="overScreen">
+      <div class="panel small">
+        <h2 class="overTitle" id="overTitle">YOU DIED</h2>
+        <div class="stats" id="overStats"></div>
+        <div class="startRow">
+          <button id="retryBtn" class="primary">Retry this seed <span class="hintKey">R</span></button>
+          <button id="newRunBtn">New dungeon</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <script type="module">
-    import { DungeonApp } from './src/dungeon/app.js';
-    window.__dungeon = new DungeonApp();
+    import { Game } from './src/dungeon/game.js';
+    window.__game = new Game();
   </script>
 </body>
 </html>
