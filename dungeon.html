@@ -9,88 +9,46 @@
 <body>
   <div class="stage">
     <canvas id="gl"></canvas>
+    <canvas id="hudCanvas"></canvas>
 
-    <!-- combat feedback layers -->
+    <!-- full-screen tints stay in CSS: they are washes, not pixel art -->
     <div id="damageFlash" class="damageFlash"></div>
     <div id="lowHp" class="lowHp"></div>
 
-    <div id="hud" class="hud hidden">
-      <div class="cross" id="cross"></div>
-      <div class="hitmark" id="hitmark"></div>
-
-      <div class="compassRail"><div class="compass" id="compass">▲</div></div>
-
-      <div class="topLeft">
-        <div class="objective" id="objective"></div>
-        <div class="keys" id="keys"></div>
-      </div>
-
-      <div class="topRight">
-        <div class="scoreBox">
-          <div class="scoreLabel">SCORE</div>
-          <div class="scoreValue" id="score">0</div>
-          <div class="combo" id="combo"></div>
-          <div class="comboTrack"><div class="comboBar" id="comboBar"></div></div>
-        </div>
-      </div>
-
-      <div class="mapwrap"><canvas id="map"></canvas></div>
-
-      <div class="bossBar hidden" id="bossBar">
-        <div class="bossName">THE WARDEN</div>
-        <div class="bossTrack"><div class="bossFill" id="bossFill"></div></div>
-      </div>
-
-      <div class="toast" id="toast"></div>
-
-      <div class="banner" id="banner">
-        <div class="bannerTitle" id="bannerTitle"></div>
-        <div class="bannerSub" id="bannerSub"></div>
-      </div>
-
-      <div class="bottomBar">
-        <div class="vital">
-          <div class="vitalLabel">HULL</div>
-          <div class="track"><div class="fill hp" id="hpFill"></div></div>
-          <div class="vitalValue" id="hpText">120</div>
-        </div>
-        <div class="depthBox">
-          <div class="vitalLabel">DEPTH</div>
-          <div class="depthValue" id="depth">1/4</div>
-        </div>
-        <div class="vital">
-          <div class="vitalLabel">CHARGE</div>
-          <div class="track"><div class="fill energy" id="energyFill"></div></div>
-          <div class="vitalValue" id="energyText">100</div>
-        </div>
-      </div>
-    </div>
+    <div class="mapwrap hidden" id="mapwrap"><canvas id="map"></canvas></div>
 
     <!-- title -->
     <div class="screen" id="titleScreen">
       <div class="panel">
-        <h1 class="logo">NEXUS <span>DEPTHS</span></h1>
-        <p class="tag">Four floors down. One way out. Everything between you and it is awake.</p>
+        <h1 class="logo">NEXUS DEPTHS</h1>
+        <p class="tag">FOUR FLOORS DOWN. ONE WAY OUT.<br />EVERYTHING BETWEEN YOU AND IT IS AWAKE.</p>
 
-        <div class="controls">
-          <div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move · <kbd>Shift</kbd> sprint</div>
-          <div><b>Left click</b> pulse · <b>Right click</b> / <kbd>Space</kbd> blast</div>
-          <div><kbd>Esc</kbd> pause · mouse to look</div>
-        </div>
-
-        <div class="brief">
-          <div><b>Objective</b> — descend to depth 4 and destroy the Warden.</div>
-          <div><b>Keys</b> unlock the doors barring the way down. The compass points to the next one.</div>
-          <div><b>Chain kills</b> within four seconds to build a score multiplier up to ×5.</div>
+        <div class="cols">
+          <div class="col">
+            <h3>CONTROLS</h3>
+            <div class="line"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> MOVE</div>
+            <div class="line"><kbd>SHIFT</kbd> SPRINT</div>
+            <div class="line"><b>L-CLICK</b> PULSE</div>
+            <div class="line"><b>R-CLICK</b>/<kbd>SPC</kbd> BLAST</div>
+            <div class="line"><kbd>ESC</kbd> PAUSE</div>
+          </div>
+          <div class="col">
+            <h3>MISSION</h3>
+            <div class="line">REACH DEPTH 4</div>
+            <div class="line">DESTROY THE WARDEN</div>
+            <div class="line">KEYS OPEN THE WAY DOWN</div>
+            <div class="line">CHAIN KILLS FOR <b>×5</b></div>
+            <div class="line">HULL DOES NOT REGENERATE</div>
+          </div>
         </div>
 
         <div class="startRow">
-          <label>Seed <input id="seedInput" type="number" placeholder="random" style="width:110px" /></label>
-          <button id="startBtn" class="primary">Descend</button>
-          <button id="randomBtn">Random run</button>
-          <button id="muteBtn">Sound: on</button>
+          <label>SEED <input id="seedInput" type="number" placeholder="RANDOM" /></label>
+          <button id="startBtn" class="primary">DESCEND</button>
+          <button id="randomBtn">RANDOM</button>
+          <button id="muteBtn">SOUND ON</button>
         </div>
-        <div class="bestLine">Best score: <b id="bestScore">—</b></div>
+        <div class="bestLine">BEST <b id="bestScore">000000</b></div>
       </div>
     </div>
 
@@ -98,10 +56,10 @@
     <div class="screen hidden" id="pauseScreen">
       <div class="panel small">
         <h2>PAUSED</h2>
-        <p class="tag">The dungeon waits.</p>
+        <p class="tag">THE DUNGEON WAITS.</p>
         <div class="startRow">
-          <button id="resumeBtn" class="primary">Resume</button>
-          <button id="quitBtn">Abandon run</button>
+          <button id="resumeBtn" class="primary">RESUME</button>
+          <button id="quitBtn">ABANDON</button>
         </div>
       </div>
     </div>
@@ -112,8 +70,8 @@
         <h2 class="overTitle" id="overTitle">YOU DIED</h2>
         <div class="stats" id="overStats"></div>
         <div class="startRow">
-          <button id="retryBtn" class="primary">Retry this seed <span class="hintKey">R</span></button>
-          <button id="newRunBtn">New dungeon</button>
+          <button id="retryBtn" class="primary">RETRY <span class="hintKey">R</span></button>
+          <button id="newRunBtn">NEW DUNGEON</button>
         </div>
       </div>
     </div>

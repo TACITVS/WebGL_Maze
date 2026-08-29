@@ -72,6 +72,35 @@ Getting lost is not difficulty, it is just tedium. So:
 - the **objective line** always names the next concrete thing to do;
 - each floor has its own **palette and name**, so depth is legible at a glance.
 
+## Presentation
+
+The whole frame is drawn at **340 pixels tall** and scaled up by the browser with
+nearest-neighbour filtering. The pixels are real, not a shader imitating them —
+which also means the game renders roughly 2.5x fewer fragments than it would at
+native resolution.
+
+- **Enemies are sprites.** Upright billboards that rotate about Y only, so a
+  monster stays standing on the floor instead of tipping over when you look down
+  at it. Alpha is cut hard rather than blended, keeping pixel edges crisp and
+  letting sprites use the depth buffer like any other geometry.
+- **The art is code.** `sprites.js` paints every sprite at boot with integer
+  `fillRect` calls onto a canvas, which becomes the atlas texture. There are no
+  binary assets in the repository. `lab-sprites.html` renders the sheet at 6x for
+  working on it.
+- **One set of art covers every state.** Tinting and a slight swell are applied
+  in the shader, so hurt flashes and attack wind-ups need no extra frames — each
+  creature has just a two-frame walk plus an attack pose.
+- **Colour is quantised to 18 levels through a 4x4 ordered dither.** Posterising
+  alone painted concentric contour rings across every flat wall; the dither turns
+  those bands into a pixel pattern that reads as deliberate.
+- **The HUD is drawn as pixels too**, on its own canvas at the same resolution,
+  with a 5x7 bitmap font defined in `hudfont.js`. Doing it in the DOM would have
+  put smooth anti-aliased type on top of a deliberately pixelated game. Bars are
+  segmented into discrete cells, because segments read as a quantity at a glance
+  in a way a smooth fill never does. Scanlines are drawn over everything from the
+  same canvas, which ties the picture together as one screen rather than a game
+  with a UI stuck on top.
+
 ## Audio
 
 Everything is synthesised at runtime with the Web Audio API — no files, no
@@ -120,8 +149,9 @@ non-dodging bot barely survives, so a real player has room to be good.
 
 ## Extending it
 
-- **New enemy**: one entry in `ENEMY_TYPES` and a weight in `budgetFor`. The AI,
-  telegraph, rendering and drops all key off the type.
+- **New enemy**: one entry in `ENEMY_TYPES`, a weight in `budgetFor`, and three
+  poses in `sprites.js` named `<kind>0`, `<kind>1`, `<kind>2`. The AI, telegraph,
+  rendering and drops all key off the type.
 - **New weapon**: follow `firePulse` / `fireBlast` in `game.js` — the raycast,
   wall trace and splash helpers are already there.
 - **Tuning**: the `PLAYER`, `PULSE` and `BLAST` constants at the top of

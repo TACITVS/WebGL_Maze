@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8" /><title>Sprite sheet preview</title>
+<style>
+  body { margin:0; background:#11161c; color:#dfe8ef; font:13px system-ui; padding:18px; }
+  canvas { image-rendering: pixelated; background:#0a0e13; border:1px solid #2a3946; }
+  .row { display:flex; gap:18px; flex-wrap:wrap; align-items:flex-end; margin-top:14px; }
+  figure { margin:0; text-align:center; }
+  figcaption { font-size:11px; color:#8fa0ad; margin-top:5px; }
+</style></head>
+<body>
+  <h3 style="margin:0">Sprite atlas preview</h3>
+  <div class="row" id="row"></div>
+  <script type="module">
+    import { buildSpriteAtlas, SPRITES } from './src/dungeon/sprites.js';
+    const { canvas, frames } = buildSpriteAtlas();
+    const row = document.getElementById('row');
+    const SCALE = 6;
+    for (const s of SPRITES) {
+      const f = frames.get(s.name);
+      const c = document.createElement('canvas');
+      c.width = s.w * SCALE; c.height = s.h * SCALE;
+      const g = c.getContext('2d');
+      g.imageSmoothingEnabled = false;
+      g.drawImage(canvas, f.u0 * canvas.width, f.v0 * canvas.height, s.w, s.h, 0, 0, c.width, c.height);
+      const fig = document.createElement('figure');
+      fig.appendChild(c);
+      const cap = document.createElement('figcaption');
+      cap.textContent = s.name;
+      fig.appendChild(cap);
+      row.appendChild(fig);
+    }
+    window.__ready = true;
+  </script>
+</body></html>

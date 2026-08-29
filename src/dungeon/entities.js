@@ -7,7 +7,6 @@
  * roomful of monsters costs about the same as one.
  */
 
-import { Box } from './compiler.js';
 import { TILE_SIZE, DIRS } from './grid.js';
 import { ROOM_TYPE } from './generator.js';
 
@@ -553,72 +552,78 @@ export class Swarm {
 
   /* ---------------------------- rendering ------------------------------ */
 
-  boxes(time) {
+  /** The atlas lookup, handed over once the renderer has built it. */
+  setFrames(frames) {
+    this.frames = frames;
+  }
+
+  /**
+   * Billboard descriptors for everything alive.
+   *
+   * Enemies pick a walk frame from their bob and switch to the attack pose while
+   * winding up; the tint carries the hurt flash and the wind-up glow, so one set
+   * of art covers every state.
+   */
+  spriteList() {
+    const frames = this.frames;
     const out = [];
+    if (!frames) return out;
+
     for (const enemy of this.enemies) {
       if (enemy.hp <= 0) continue;
       const type = enemy.type;
-      const flash = enemy.hurtFlash > 0;
       const winding = enemy.state === 'windup';
-      // Telegraph: an enemy about to strike swells and glows, so a good player
-      // can read the room and dodge.
       const tell = winding ? Math.min(1, enemy.stateTime / type.windup) : 0;
-      const colour = flash
-        ? [1, 0.92, 0.92]
-        : [
-          type.colour[0] + tell * 0.5,
-          type.colour[1] * (1 - tell * 0.45),
-          type.colour[2] * (1 - tell * 0.45),
-        ];
-      const bob = Math.sin(enemy.bob) * (enemy.state === 'chase' ? 0.07 : 0.03);
-      const swell = 1 + tell * 0.16;
-      const bodyY = enemy.y + type.height * 0.5 + bob;
-      out.push(new Box(
-        enemy.x, bodyY, enemy.z,
-        type.body[0] * swell, type.body[1] * swell, type.body[2] * swell,
-        colour, 'enemy', flash ? 0.8 : tell * 0.55,
-      ));
-      // Head plus a facing eye, so you can tell where it is looking.
-      const headY = enemy.y + type.height * (type.boss ? 0.88 : 0.86) + bob;
-      const headSize = type.body[0] * 0.66;
-      out.push(new Box(enemy.x, headY, enemy.z, headSize, headSize, headSize, colour, 'enemy', tell * 0.5));
-      const fx = Math.sin(enemy.facing);
-      const fz = -Math.cos(enemy.facing);
-      out.push(new Box(
-        enemy.x + fx * headSize, headY, enemy.z + fz * headSize,
-        headSize * 0.42, headSize * 0.32, headSize * 0.42,
-        type.eye, 'enemy', 1.0,
-      ));
-      if (type.boss) {
-        // Pauldrons, purely so the silhouette reads as a boss at a glance.
-        for (const side of [-1, 1]) {
-          out.push(new Box(
-            enemy.x + fz * side * type.body[0] * 1.05,
-            enemy.y + type.height * 0.7 + bob,
-            enemy.z - fx * side * type.body[0] * 1.05,
-            type.body[0] * 0.42, type.body[1] * 0.3, type.body[2] * 0.42,
-            colour, 'enemy', tell * 0.4,
-          ));
-        }
+      const step = Math.floor(enemy.bob / Math.PI) % 2 === 0 ? 0 : 1;
+      const frame = frames.get(`${enemy.kind}${winding ? 2 : step}`) || frames.get(`${enemy.kind}0`);
+      if (!frame) continue;
+      const flash = enemy.hurtFlash > 0;
+      const tint = flash
+        ? [2.4, 2.2, 2.2]
+        : [1 + tell * 1.1, 1 - tell * 0.25, 1 - tell * 0.35];
+      // Swelling on the wind-up reads even in peripheral vision.
+      const height = type.height * (1 + tell * 0.12);
+      out.push({
+        x: enemy.x,
+        y: enemy.y + Math.sin(enemy.bob) * 0.03,
+        z: enemy.z,
+        h: height,
+        w: height * frame.aspect,
+        frame,
+        tint,
+        emissive: flash ? 0.75 : tell * 0.45,
+      });
+    }
+
+    const shot = frames.get('shot');
+    const shotHot = frames.get('shotHot');
+    for (const p of this.projectiles) {
+      const frame = p.damage > 15 ? (shotHot || shot) : shot;
+      if (!frame) continue;
+      out.push({ x: p.x, y: p.y - 0.2, z: p.z, w: 0.42, h: 0.42, frame, tint: [1, 1, 1], emissive: 1 });
+    }
+
+    const spark = frames.get('spark');
+    if (spark) {
+      for (const p of this.particles) {
+        const fade = Math.max(0, p.life / p.maxLife);
+        const size = p.size * 3.2 * (0.35 + fade);
+        out.push({
+          x: p.x, y: p.y - size / 2, z: p.z, w: size, h: size,
+          frame: spark,
+          tint: [p.colour[0] * 1.6, p.colour[1] * 1.6, p.colour[2] * 1.6],
+          emissive: fade,
+        });
       }
     }
 
-    for (const p of this.projectiles) {
-      out.push(new Box(p.x, p.y, p.z, 0.16, 0.16, 0.16, p.colour, 'shot', 1.0));
-    }
-
-    for (const p of this.particles) {
-      const fade = Math.max(0, p.life / p.maxLife);
-      out.push(new Box(p.x, p.y, p.z, p.size, p.size, p.size, p.colour, 'spark', fade));
-    }
-
     for (const item of this.pickups) {
-      const lift = 0.45 + Math.sin(item.bob) * 0.09;
-      const colour = item.kind === 'health' ? [1.0, 0.32, 0.38] : [0.35, 0.85, 1.0];
-      out.push(new Box(item.x, item.y + lift, item.z, 0.17, 0.17, 0.17, colour, 'pickup', 1.0));
-      out.push(new Box(item.x, item.y + 0.03, item.z, 0.3, 0.02, 0.3, colour, 'pickup', 0.5));
+      const frame = frames.get(item.kind === 'health' ? 'health' : 'energy');
+      if (!frame) continue;
+      const lift = 0.35 + Math.sin(item.bob) * 0.10;
+      out.push({ x: item.x, y: item.y + lift, z: item.z, w: 0.5, h: 0.5, frame, tint: [1, 1, 1], emissive: 0.85 });
     }
-    void time;
+
     return out;
   }
 

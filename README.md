@@ -19,6 +19,7 @@ python -m http.server 8000
 ├── index.html          # Nexus Maze: bootstraps the UI shell and loads the entrypoint
 ├── dungeon.html        # Nexus Depths: the playable dungeon crawler
 ├── lab.html            # Nexus Depths: generator + validation tooling
+├── lab-sprites.html    # Nexus Depths: sprite sheet preview
 ├── styles/             # Global styling resources
 ├── src/
 │   ├── audio/          # Tone.js integration and sound design
@@ -49,9 +50,16 @@ minutes and your best score persists.
 - **WASD** move · **Shift** sprint · **mouse** look
 - **Left click** pulse · **Right click** / **Space** blast · **Esc** pause
 
-Music and every sound effect are synthesised at runtime with the Web Audio API —
-no audio files and no libraries. Design notes, enemy stats and how the balance
-was measured are in [docs/GAME_DESIGN.md](docs/GAME_DESIGN.md).
+It renders at 340p and scales up with nearest-neighbour filtering, so the pixels
+are real. Enemies are billboard sprites, the HUD is drawn with a 5x7 bitmap font
+onto its own canvas, and every sprite is painted at boot with `fillRect` calls —
+there are no binary assets in the repository. Music and every sound effect are
+synthesised at runtime with the Web Audio API, so there are no audio files or
+libraries either.
+
+Design notes, enemy stats and how the balance was measured are in
+[docs/GAME_DESIGN.md](docs/GAME_DESIGN.md). `lab-sprites.html` renders the sprite
+sheet at 6x for working on the art.
 
 ## The generator underneath
 

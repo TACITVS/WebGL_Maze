@@ -12,8 +12,10 @@ import { compileDungeon, Box } from './compiler.js';
 import { DungeonPhysics } from './physics.js';
 import { Renderer } from './renderer.js';
 import { AutoMap } from './minimap.js';
+import { Hud } from './hud.js';
 import { Swarm } from './entities.js';
 import { AudioEngine } from './audio.js';
+import { buildSpriteAtlas } from './sprites.js';
 import { RNG } from './rng.js';
 import { TILE_SIZE } from './grid.js';
 
@@ -45,28 +47,11 @@ export class Game {
   constructor() {
     this.el = {
       canvas: document.getElementById('gl'),
+      hudCanvas: document.getElementById('hudCanvas'),
       map: document.getElementById('map'),
-      hp: document.getElementById('hpFill'),
-      hpText: document.getElementById('hpText'),
-      energy: document.getElementById('energyFill'),
-      energyText: document.getElementById('energyText'),
-      score: document.getElementById('score'),
-      combo: document.getElementById('combo'),
-      comboBar: document.getElementById('comboBar'),
-      depth: document.getElementById('depth'),
-      objective: document.getElementById('objective'),
-      keys: document.getElementById('keys'),
-      compass: document.getElementById('compass'),
-      crosshair: document.getElementById('cross'),
-      hitmark: document.getElementById('hitmark'),
+      mapwrap: document.getElementById('mapwrap'),
       damage: document.getElementById('damageFlash'),
       lowHp: document.getElementById('lowHp'),
-      banner: document.getElementById('banner'),
-      bannerTitle: document.getElementById('bannerTitle'),
-      bannerSub: document.getElementById('bannerSub'),
-      toast: document.getElementById('toast'),
-      bossBar: document.getElementById('bossBar'),
-      bossFill: document.getElementById('bossFill'),
       title: document.getElementById('titleScreen'),
       over: document.getElementById('overScreen'),
       overTitle: document.getElementById('overTitle'),
@@ -74,11 +59,15 @@ export class Game {
       pause: document.getElementById('pauseScreen'),
       seed: document.getElementById('seedInput'),
       best: document.getElementById('bestScore'),
-      hud: document.getElementById('hud'),
     };
 
     this.renderer = new Renderer(this.el.canvas);
+    // The sprite sheet is painted once at boot and lives on the GPU thereafter.
+    const atlas = buildSpriteAtlas();
+    this.renderer.setSpriteAtlas(atlas.canvas);
+    this.spriteFrames = atlas.frames;
     this.map = new AutoMap(this.el.map);
+    this.hud = new Hud(this.el.hudCanvas);
     this.audio = new AudioEngine();
 
     this.state = 'title';
@@ -94,7 +83,8 @@ export class Game {
     this.toasts = [];
 
     this.bindInput();
-    window.addEventListener('resize', () => this.renderer.resize());
+    window.addEventListener('resize', () => this.syncResolution());
+    this.syncResolution();
     this.showBest();
     requestAnimationFrame((t) => this.frame(t));
   }
@@ -105,14 +95,14 @@ export class Game {
     let best = 0;
     try { best = Number(localStorage.getItem('nexusDepthsBest')) || 0; } catch { best = 0; }
     this.best = best;
-    if (this.el.best) this.el.best.textContent = best ? best.toLocaleString() : '—';
+    if (this.el.best) this.el.best.textContent = String(best).padStart(6, '0');
   }
 
   recordBest() {
     if (this.score <= this.best) return;
     this.best = this.score;
     try { localStorage.setItem('nexusDepthsBest', String(this.score)); } catch { /* private mode */ }
-    if (this.el.best) this.el.best.textContent = this.best.toLocaleString();
+    if (this.el.best) this.el.best.textContent = String(this.best).padStart(6, '0');
   }
 
   startRun(seed) {
@@ -123,6 +113,7 @@ export class Game {
     this.renderer.setDungeon(this.dungeon, this.compiled);
     this.map.reset(this.dungeon);
     this.swarm = new Swarm(this.dungeon, this.physics, new RNG(seed ^ 0x5f3759df)).populate();
+    this.swarm.setFrames(this.spriteFrames);
 
     const startRoom = this.dungeon.roomsById.get(this.dungeon.start);
     const plan = this.dungeon.floors[startRoom.floor];
@@ -165,8 +156,9 @@ export class Game {
     this.el.title.classList.add('hidden');
     this.el.over.classList.add('hidden');
     this.el.pause.classList.add('hidden');
-    this.el.hud.classList.remove('hidden');
-    this.banner(`DEPTH 1 — ${DEPTH_NAMES[0].toUpperCase()}`, 'Find the way down. Something is already awake.');
+    this.el.mapwrap.classList.remove('hidden');
+    this.hud.clearMessages();
+    this.banner(`DEPTH 1 - ${DEPTH_NAMES[0].toUpperCase()}`, 'FIND THE WAY DOWN. SOMETHING IS ALREADY AWAKE.');
     this.el.canvas.requestPointerLock?.();
   }
 
@@ -269,7 +261,9 @@ export class Game {
     this.el.pause.classList.add('hidden');
     this.el.over.classList.add('hidden');
     this.el.title.classList.remove('hidden');
-    this.el.hud.classList.add('hidden');
+    this.el.mapwrap.classList.add('hidden');
+    this.hud.clearMessages();
+    this.hud.draw(null, 0);
     document.exitPointerLock?.();
     this.audio.setIntensity(0);
     this.audio.setBoss(false);
@@ -278,20 +272,17 @@ export class Game {
   /* ------------------------------ feedback ----------------------------- */
 
   banner(title, sub) {
-    this.el.bannerTitle.textContent = title;
-    this.el.bannerSub.textContent = sub || '';
-    this.el.banner.classList.remove('show');
-    // Restart the CSS animation.
-    void this.el.banner.offsetWidth;
-    this.el.banner.classList.add('show');
+    this.hud.banner(title, sub);
   }
 
   toast(text, tone = '') {
-    const node = document.createElement('div');
-    node.className = `toastLine ${tone}`;
-    node.textContent = text;
-    this.el.toast.appendChild(node);
-    setTimeout(() => node.remove(), 1500);
+    this.hud.toast(text, tone);
+  }
+
+  /** Keep the HUD canvas at exactly the renderer's pixel grid. */
+  syncResolution() {
+    this.renderer.resize();
+    this.hud.resize(this.renderer.canvas.width, this.renderer.canvas.height);
   }
 
   /* ------------------------------- combat ------------------------------ */
@@ -502,7 +493,7 @@ export class Game {
     this.audio.setBoss(false);
     this.recordBest();
     document.exitPointerLock?.();
-    this.el.bossBar.classList.add('hidden');
+    this.bossState = null;
     this.el.overTitle.textContent = 'THE WARDEN FALLS';
     this.el.overTitle.className = 'overTitle good';
     this.el.overStats.innerHTML = this.runSummary();
@@ -512,13 +503,14 @@ export class Game {
   runSummary() {
     const minutes = Math.floor(this.runTime / 60);
     const seconds = Math.floor(this.runTime % 60).toString().padStart(2, '0');
+    const pad = (n) => String(Math.max(0, Math.round(n))).padStart(6, '0');
     return `
-      <div class="statRow"><span>Score</span><b>${this.score.toLocaleString()}</b></div>
-      <div class="statRow"><span>Kills</span><b>${this.kills}</b></div>
-      <div class="statRow"><span>Deepest</span><b>Depth ${this.deepest + 1}</b></div>
-      <div class="statRow"><span>Time</span><b>${minutes}:${seconds}</b></div>
-      <div class="statRow"><span>Seed</span><b>${this.seed}</b></div>
-      <div class="statRow best"><span>Best</span><b>${Math.max(this.best, this.score).toLocaleString()}</b></div>`;
+      <div class="statRow"><span>SCORE</span><b>${pad(this.score)}</b></div>
+      <div class="statRow"><span>KILLS</span><b>${this.kills}</b></div>
+      <div class="statRow"><span>DEEPEST</span><b>DEPTH ${this.deepest + 1}</b></div>
+      <div class="statRow"><span>TIME</span><b>${minutes}:${seconds}</b></div>
+      <div class="statRow"><span>SEED</span><b>${this.seed}</b></div>
+      <div class="statRow best"><span>BEST</span><b>${pad(Math.max(this.best, this.score))}</b></div>`;
   }
 
   /* ------------------------------- update ------------------------------ */
@@ -583,8 +575,8 @@ export class Game {
     const name = DEPTH_NAMES[floorIndex] || `Depth ${floorIndex + 1}`;
     const last = floorIndex === this.dungeon.floorCount - 1;
     this.banner(
-      `DEPTH ${floorIndex + 1} — ${name.toUpperCase()}`,
-      last ? 'The Warden is here. Kill it.' : 'Deeper. Louder. Keep moving.',
+      `DEPTH ${floorIndex + 1} - ${name.toUpperCase()}`,
+      last ? 'THE WARDEN IS HERE. KILL IT.' : 'DEEPER. LOUDER. KEEP MOVING.',
     );
   }
 
@@ -603,24 +595,23 @@ export class Game {
     const goal = this.dungeon.roomsById.get(this.dungeon.goal);
     if (!target && goal && goal.floor === floorIndex) {
       const world = this.dungeon.floors[goal.floor].worldOf(goal.cx, goal.cz);
-      target = { d: Math.hypot(world[0] - this.player.x, world[2] - this.player.z), x: world[0], z: world[2], label: 'WARDEN' };
+      target = {
+        d: Math.hypot(world[0] - this.player.x, world[2] - this.player.z),
+        x: world[0], z: world[2], label: 'WARDEN',
+      };
     }
-    if (!target) { this.el.compass.style.opacity = '0'; return; }
+    if (!target) { this.compass = null; return; }
     const angle = Math.atan2(target.x - this.player.x, -(target.z - this.player.z));
     let delta = angle - this.player.yaw;
     while (delta > Math.PI) delta -= Math.PI * 2;
     while (delta < -Math.PI) delta += Math.PI * 2;
-    const clamped = Math.max(-1, Math.min(1, delta / (Math.PI * 0.55)));
-    this.el.compass.style.opacity = '1';
-    this.el.compass.style.transform = `translateX(${clamped * 46}%)`;
-    this.el.compass.textContent = `▲ ${target.label} ${Math.round(target.d)}m`;
-    this.el.compass.classList.toggle('behind', Math.abs(delta) > Math.PI * 0.55);
+    this.compass = { label: target.label, distance: target.d, delta };
   }
 
   checkBoss(floorIndex) {
     const boss = this.swarm.boss;
-    if (!boss || this.bossDead) return;
-    if (boss.hp <= 0) { this.el.bossBar.classList.add('hidden'); return; }
+    if (!boss || this.bossDead) { this.bossState = null; return; }
+    if (boss.hp <= 0) { this.bossState = null; return; }
     const goal = this.dungeon.roomsById.get(this.dungeon.goal);
     if (!this.bossAwake) {
       if (floorIndex !== boss.floor) return;
@@ -634,47 +625,45 @@ export class Game {
       boss.state = 'chase';
       this.audio.play('bossRoar');
       this.audio.setBoss(true);
-      this.banner('THE WARDEN', 'It has been waiting for you.');
-      this.el.bossBar.classList.remove('hidden');
+      this.banner('THE WARDEN', 'IT HAS BEEN WAITING FOR YOU');
     }
-    this.el.bossFill.style.width = `${Math.max(0, (boss.hp / boss.maxHp) * 100)}%`;
+    this.bossState = { name: 'THE WARDEN', ratio: Math.max(0, boss.hp / boss.maxHp) };
   }
 
-  updateHud(floorIndex) {
-    const hpPct = (this.player.hp / PLAYER.maxHp) * 100;
-    this.el.hp.style.width = `${Math.max(0, hpPct)}%`;
-    this.el.hp.classList.toggle('critical', hpPct < 30);
-    this.el.hpText.textContent = `${Math.ceil(Math.max(0, this.player.hp))}`;
-    this.el.energy.style.width = `${(this.player.energy / PLAYER.maxEnergy) * 100}%`;
-    this.el.energyText.textContent = `${Math.floor(this.player.energy)}`;
-    this.el.score.textContent = this.score.toLocaleString();
-    this.el.depth.textContent = `${floorIndex + 1}/${this.dungeon.floorCount}`;
-
-    const multiplier = this.comboMultiplier();
-    if (this.combo > 0 && this.comboTimer > 0) {
-      this.el.combo.textContent = `×${multiplier}  (${this.combo} chain)`;
-      this.el.combo.classList.add('active');
-      this.el.comboBar.style.width = `${(this.comboTimer / COMBO_WINDOW) * 100}%`;
-    } else {
-      this.el.combo.textContent = '';
-      this.el.combo.classList.remove('active');
-      this.el.comboBar.style.width = '0%';
-    }
-
+  updateHud(floorIndex, dt) {
     const owed = this.dungeon.locks.filter((l) => !this.held.has(l.id));
-    this.el.keys.innerHTML = this.dungeon.locks
-      .map((l) => `<span class="keyPip ${this.held.has(l.id) ? 'have' : ''}" style="--c:rgb(${l.color.map((v) => Math.round(v * 255)).join(',')})">${l.name}</span>`)
-      .join('');
-
     const remaining = this.swarm.aliveOnFloor(floorIndex);
-    if (this.bossAwake && !this.bossDead) this.el.objective.textContent = 'Destroy the Warden';
-    else if (owed.length) this.el.objective.textContent = `Find the ${owed[0].name} key · ${remaining} hostiles on this depth`;
-    else this.el.objective.textContent = `Descend · ${remaining} hostiles on this depth`;
+    let objective;
+    if (this.bossAwake && !this.bossDead) objective = 'DESTROY THE WARDEN';
+    else if (owed.length) objective = `FIND THE ${owed[0].name} KEY - ${remaining} HOSTILE${remaining === 1 ? '' : 'S'}`;
+    else objective = `DESCEND - ${remaining} HOSTILE${remaining === 1 ? '' : 'S'}`;
+
+    this.hud.draw({
+      hp: this.player.hp,
+      maxHp: PLAYER.maxHp,
+      energy: this.player.energy,
+      maxEnergy: PLAYER.maxEnergy,
+      score: this.score,
+      combo: this.combo,
+      comboTimer: this.comboTimer,
+      comboWindow: COMBO_WINDOW,
+      multiplier: this.comboMultiplier(),
+      depth: floorIndex + 1,
+      floors: this.dungeon.floorCount,
+      objective,
+      locks: this.dungeon.locks.map((l) => ({
+        name: l.name.toUpperCase(),
+        held: this.held.has(l.id),
+        colour: `rgb(${l.color.map((v) => Math.round(v * 255)).join(',')})`,
+      })),
+      compass: this.compass,
+      boss: this.bossState,
+      hitmark: this.hitmarkTimer,
+    }, dt);
 
     this.el.damage.style.opacity = String(this.damageFlash * 0.55);
     const low = this.player.hp / PLAYER.maxHp < 0.3 && this.state === 'playing';
     this.el.lowHp.classList.toggle('show', low);
-    this.el.hitmark.style.opacity = this.hitmarkTimer > 0 ? '1' : '0';
   }
 
   step(dt, floorIndex) {
@@ -742,7 +731,7 @@ export class Game {
       this.updateDepth(floorIndex);
       this.checkBoss(floorIndex);
       this.updateCompass(floorIndex);
-      this.updateHud(floorIndex);
+      this.updateHud(floorIndex, raw);
       this.map.observe(floorIndex, this.player.x, this.player.z);
 
       // Music tracks how much trouble the player is in.
@@ -753,8 +742,8 @@ export class Game {
 
     if (this.dungeon) {
       const floorIndex = this.physics.floorAt(this.player.y);
-      const dynamic = this.swarm.boxes(now / 1000);
-      if (this.state === 'playing') dynamic.push(...this.viewModelBoxes());
+      const dynamic = this.state === 'playing' ? this.viewModelBoxes() : [];
+      this.renderer.setSprites(this.swarm.spriteList());
       if (this.muzzle) {
         this.muzzle.life -= raw;
         if (this.muzzle.life <= 0) this.muzzle = null;

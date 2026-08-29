@@ -1,32 +1,20 @@
 /**
  * WebGL renderer.
  *
- * Geometry is static, so the whole dungeon uploads once into two buffers - the
- * full world and a roofless cutaway. Lighting is where the mood comes from: a
- * weak headlamp plus the nearest torches, picked per frame, which is what makes
- * a corridor feel like a corridor rather than a lit box.
+ * Two passes over the same lighting model: box geometry for the dungeon itself,
+ * and textured billboards for everything alive. The frame is drawn at a low
+ * internal resolution and scaled up by the browser with nearest-neighbour
+ * filtering, which is what gives the game its chunky arcade look - the pixels
+ * are real, not a filter.
  */
 
 const MAX_LIGHTS = 8;
 
-const VERTEX_SHADER = `
-attribute vec3 aP, aN, aC;
-attribute float aE;
-uniform mat4 uVP;
-varying vec3 vN, vC, vW;
-varying float vE;
-void main() {
-  vN = aN;
-  vC = aC;
-  vW = aP;
-  vE = aE;
-  gl_Position = uVP * vec4(aP, 1.0);
-}`;
+/** Internal render height in pixels. Width follows the viewport aspect. */
+const PIXEL_HEIGHT = 340;
 
-const FRAGMENT_SHADER = `
-precision mediump float;
-varying vec3 vN, vC, vW;
-varying float vE;
+/** Shared lighting body, so sprites and walls sit in the same world. */
+const LIGHT_UNIFORMS = `
 uniform vec3 uEye;
 uniform vec3 uLightPos[${MAX_LIGHTS}];
 uniform vec3 uLightColor[${MAX_LIGHTS}];
@@ -35,30 +23,98 @@ uniform vec3 uFogColor;
 uniform float uAmbient;
 uniform float uFogStart;
 uniform float uFogRange;
-void main() {
-  vec3 N = normalize(vN);
-  vec3 toEye = uEye - vW;
+`;
+
+const LIGHT_BODY = `
+// Ordered 4x4 dither, built from two nested 2x2 matrices so it needs no array
+// indexing - GLSL ES 1.0 is fussy about that. Without it, quantising smooth
+// torchlight paints concentric contour rings across every flat wall.
+float bayer2(vec2 p) {
+  return p.x * 2.0 + p.y * 3.0 - p.x * p.y * 4.0;
+}
+float ditherValue(vec2 fragment) {
+  vec2 p = floor(mod(fragment, 4.0));
+  return (bayer2(floor(p * 0.5)) * 4.0 + bayer2(mod(p, 2.0))) / 16.0;
+}
+
+vec3 shade(vec3 albedo, vec3 N, vec3 world, float emissive) {
+  vec3 toEye = uEye - world;
   float dEye = length(toEye);
   vec3 E = toEye / max(dEye, 0.001);
 
-  vec3 lit = vC * uAmbient;
-  // Headlamp: keeps the player from being blind between torches.
-  lit += vC * max(dot(N, E), 0.0) * 0.20 / (1.0 + dEye * dEye * 0.06);
+  vec3 lit = albedo * uAmbient;
+  lit += albedo * max(dot(N, E), 0.0) * 0.20 / (1.0 + dEye * dEye * 0.06);
 
   for (int i = 0; i < ${MAX_LIGHTS}; i++) {
-    vec3 delta = uLightPos[i] - vW;
+    vec3 delta = uLightPos[i] - world;
     float dist = length(delta);
     float atten = uLightPower[i] / (1.0 + 0.25 * dist + 0.20 * dist * dist);
     float lambert = max(dot(N, delta / max(dist, 0.001)), 0.0);
-    lit += vC * uLightColor[i] * (0.25 + 0.75 * lambert) * atten;
+    lit += albedo * uLightColor[i] * (0.25 + 0.75 * lambert) * atten;
   }
-  // Keep torchlight from blowing out surfaces the player is standing against.
   lit = lit / (1.0 + 0.62 * max(max(lit.r, lit.g), lit.b));
+  lit = mix(lit, albedo * 1.15, emissive);
 
-  // Emissive surfaces (flames, keys, wards) ignore the lighting entirely.
-  lit = mix(lit, vC * 1.15, vE);
-  float fog = clamp((dEye - uFogStart) / uFogRange, 0.0, 0.92) * (1.0 - vE);
-  gl_FragColor = vec4(mix(lit, uFogColor, fog), 1.0);
+  float fog = clamp((dEye - uFogStart) / uFogRange, 0.0, 0.92) * (1.0 - emissive);
+  lit = mix(lit, uFogColor, fog);
+  // Posterise through the dither: a limited palette is half of what makes this
+  // read as a game from the era it is imitating, and the dither is what keeps
+  // the bands from showing.
+  float levels = 18.0;
+  return floor(lit * levels + ditherValue(gl_FragCoord.xy)) / levels;
+}
+`;
+
+const WORLD_VS = `
+attribute vec3 aP, aN, aC;
+attribute float aE;
+uniform mat4 uVP;
+varying vec3 vN, vC, vW;
+varying float vE;
+void main() {
+  vN = aN; vC = aC; vW = aP; vE = aE;
+  gl_Position = uVP * vec4(aP, 1.0);
+}`;
+
+const WORLD_FS = `
+precision mediump float;
+varying vec3 vN, vC, vW;
+varying float vE;
+${LIGHT_UNIFORMS}
+${LIGHT_BODY}
+void main() {
+  gl_FragColor = vec4(shade(vC, normalize(vN), vW, vE), 1.0);
+}`;
+
+const SPRITE_VS = `
+attribute vec3 aP;
+attribute vec2 aUV;
+attribute vec3 aC;
+attribute float aE;
+uniform mat4 uVP;
+varying vec2 vUV;
+varying vec3 vC, vW;
+varying float vE;
+void main() {
+  vUV = aUV; vC = aC; vW = aP; vE = aE;
+  gl_Position = uVP * vec4(aP, 1.0);
+}`;
+
+const SPRITE_FS = `
+precision mediump float;
+varying vec2 vUV;
+varying vec3 vC, vW;
+varying float vE;
+uniform sampler2D uAtlas;
+uniform vec3 uFacing;
+${LIGHT_UNIFORMS}
+${LIGHT_BODY}
+void main() {
+  vec4 texel = texture2D(uAtlas, vUV);
+  // Hard alpha cut rather than blending: it keeps the pixel edges crisp and
+  // lets sprites use the depth buffer like any other geometry.
+  if (texel.a < 0.5) discard;
+  gl_FragColor = vec4(shade(texel.rgb * vC, uFacing, vW, vE), 1.0);
 }`;
 
 /** Static triangle soup for a list of boxes. */
@@ -78,8 +134,8 @@ export class Mesh {
       const c = b.color;
       const e = b.emissive || 0;
       if (b.basis) {
-        // Oriented box: the corners are built in the box's own frame, which is
-        // what lets a held weapon keep its shape however the camera turns.
+        // Oriented box: corners built in the box's own frame, which is what lets
+        // a held weapon keep its shape however the camera turns.
         const [bx, by, bz] = b.basis;
         const corner = (sx, sy, sz) => [
           cx + bx[0] * hx * sx + by[0] * hy * sy + bz[0] * hz * sz,
@@ -131,6 +187,67 @@ export class Mesh {
   }
 }
 
+/**
+ * Upright camera-facing quads.
+ *
+ * Billboards rotate about Y only, so a monster stays standing on the floor
+ * instead of tipping over when you look down at it.
+ */
+export class SpriteBatch {
+  constructor(gl) {
+    this.gl = gl;
+    this.buffer = gl.createBuffer();
+    this.count = 0;
+  }
+
+  /** `sprites`: {x,y,z, w, h, frame:{u0,v0,u1,v1}, tint:[r,g,b], emissive}. */
+  upload(sprites, right) {
+    const data = [];
+    const rx = right[0];
+    const rz = right[2];
+    for (const s of sprites) {
+      const hw = s.w / 2;
+      const f = s.frame;
+      const t = s.tint || [1, 1, 1];
+      const e = s.emissive || 0;
+      const x0 = s.x - rx * hw;
+      const z0 = s.z - rz * hw;
+      const x1 = s.x + rx * hw;
+      const z1 = s.z + rz * hw;
+      const yb = s.y;
+      const yt = s.y + s.h;
+      // Two triangles: bottom-left, bottom-right, top-right, top-left.
+      const corners = [
+        [x0, yb, z0, f.u0, f.v1],
+        [x1, yb, z1, f.u1, f.v1],
+        [x1, yt, z1, f.u1, f.v0],
+        [x0, yb, z0, f.u0, f.v1],
+        [x1, yt, z1, f.u1, f.v0],
+        [x0, yt, z0, f.u0, f.v0],
+      ];
+      for (const [px, py, pz, u, v] of corners) {
+        data.push(px, py, pz, u, v, t[0], t[1], t[2], e);
+      }
+    }
+    const array = new Float32Array(data);
+    this.gl.bindBuffer(this.gl.ARRAY_BUFFER, this.buffer);
+    this.gl.bufferData(this.gl.ARRAY_BUFFER, array, this.gl.DYNAMIC_DRAW);
+    this.count = array.length / 9;
+  }
+
+  draw(loc) {
+    if (!this.count) return;
+    const g = this.gl;
+    g.bindBuffer(g.ARRAY_BUFFER, this.buffer);
+    for (const a of [loc.p, loc.uv, loc.c, loc.e]) g.enableVertexAttribArray(a);
+    g.vertexAttribPointer(loc.p, 3, g.FLOAT, false, 36, 0);
+    g.vertexAttribPointer(loc.uv, 2, g.FLOAT, false, 36, 12);
+    g.vertexAttribPointer(loc.c, 3, g.FLOAT, false, 36, 20);
+    g.vertexAttribPointer(loc.e, 1, g.FLOAT, false, 36, 32);
+    g.drawArrays(g.TRIANGLES, 0, this.count);
+  }
+}
+
 /* Column-major matrices, matching WebGL's expectations. */
 export function multiply(a, b) {
   const o = new Float32Array(16);
@@ -177,15 +294,15 @@ export function lookAt(eye, target, up = [0, 1, 0]) {
 export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
-    this.gl = canvas.getContext('webgl', { antialias: true });
+    this.gl = canvas.getContext('webgl', { antialias: false });
     if (!this.gl) throw new Error('WebGL is unavailable in this browser');
     this.mode = 'fps';
     this.fov = (74 * Math.PI) / 180;
     this.lights = [];
-    this.time = 0;
-    this.orbit = { yaw: 0.7, pitch: 0.85, distance: 78, target: [40, -7, 40] };
     this.transient = [];
     this.shake = 0;
+    this.time = 0;
+    this.orbit = { yaw: 0.7, pitch: 0.85, distance: 78, target: [40, -7, 40] };
     this.initGL();
     this.resize();
   }
@@ -199,19 +316,19 @@ export class Renderer {
     return shader;
   }
 
-  initGL() {
+  link(vs, fs) {
     const g = this.gl;
     const program = g.createProgram();
-    g.attachShader(program, this.compile(g.VERTEX_SHADER, VERTEX_SHADER));
-    g.attachShader(program, this.compile(g.FRAGMENT_SHADER, FRAGMENT_SHADER));
+    g.attachShader(program, this.compile(g.VERTEX_SHADER, vs));
+    g.attachShader(program, this.compile(g.FRAGMENT_SHADER, fs));
     g.linkProgram(program);
     if (!g.getProgramParameter(program, g.LINK_STATUS)) throw new Error(g.getProgramInfoLog(program));
-    this.program = program;
-    this.loc = {
-      p: g.getAttribLocation(program, 'aP'),
-      n: g.getAttribLocation(program, 'aN'),
-      c: g.getAttribLocation(program, 'aC'),
-      e: g.getAttribLocation(program, 'aE'),
+    return program;
+  }
+
+  lightLocations(program) {
+    const g = this.gl;
+    return {
       vp: g.getUniformLocation(program, 'uVP'),
       eye: g.getUniformLocation(program, 'uEye'),
       lightPos: g.getUniformLocation(program, 'uLightPos'),
@@ -222,11 +339,35 @@ export class Renderer {
       fogStart: g.getUniformLocation(program, 'uFogStart'),
       fogRange: g.getUniformLocation(program, 'uFogRange'),
     };
+  }
+
+  initGL() {
+    const g = this.gl;
+    this.worldProgram = this.link(WORLD_VS, WORLD_FS);
+    this.worldLoc = {
+      ...this.lightLocations(this.worldProgram),
+      p: g.getAttribLocation(this.worldProgram, 'aP'),
+      n: g.getAttribLocation(this.worldProgram, 'aN'),
+      c: g.getAttribLocation(this.worldProgram, 'aC'),
+      e: g.getAttribLocation(this.worldProgram, 'aE'),
+    };
+    this.spriteProgram = this.link(SPRITE_VS, SPRITE_FS);
+    this.spriteLoc = {
+      ...this.lightLocations(this.spriteProgram),
+      p: g.getAttribLocation(this.spriteProgram, 'aP'),
+      uv: g.getAttribLocation(this.spriteProgram, 'aUV'),
+      c: g.getAttribLocation(this.spriteProgram, 'aC'),
+      e: g.getAttribLocation(this.spriteProgram, 'aE'),
+      atlas: g.getUniformLocation(this.spriteProgram, 'uAtlas'),
+      facing: g.getUniformLocation(this.spriteProgram, 'uFacing'),
+    };
+
     this.world = new Mesh(g);
     this.cutaway = new Mesh(g);
     this.overlay = new Mesh(g);
-    // Rebuilt every frame: enemies, shots, sparks, pickups.
     this.dynamic = new Mesh(g);
+    this.sprites = new SpriteBatch(g);
+
     g.enable(g.DEPTH_TEST);
     g.disable(g.CULL_FACE);
     g.clearColor(0.012, 0.014, 0.018, 1);
@@ -235,13 +376,23 @@ export class Renderer {
     this.lightPower = new Float32Array(MAX_LIGHTS);
   }
 
+  /** Hand the renderer the sprite sheet. NEAREST filtering keeps pixels sharp. */
+  setSpriteAtlas(canvas) {
+    const g = this.gl;
+    this.atlas = g.createTexture();
+    g.bindTexture(g.TEXTURE_2D, this.atlas);
+    g.texImage2D(g.TEXTURE_2D, 0, g.RGBA, g.RGBA, g.UNSIGNED_BYTE, canvas);
+    g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MIN_FILTER, g.NEAREST);
+    g.texParameteri(g.TEXTURE_2D, g.TEXTURE_MAG_FILTER, g.NEAREST);
+    g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_S, g.CLAMP_TO_EDGE);
+    g.texParameteri(g.TEXTURE_2D, g.TEXTURE_WRAP_T, g.CLAMP_TO_EDGE);
+  }
+
   setDungeon(dungeon, compiled) {
     this.world.upload(compiled.boxes);
     this.cutaway.upload(compiled.cutaway);
     this.overlay.upload([]);
     this.lights = dungeon.lights;
-    // Frame the cutaway from its own bounds: the floors are pulled apart there,
-    // so the world's extent is not the right thing to look at.
     let minY = Infinity;
     let maxY = -Infinity;
     let minX = Infinity;
@@ -259,34 +410,22 @@ export class Renderer {
     this.orbit.pitch = 0.42;
   }
 
-  setOverlay(boxes) {
-    this.overlay.upload(boxes || []);
-  }
+  setOverlay(boxes) { this.overlay.upload(boxes || []); }
+  setDynamic(boxes) { this.dynamic.upload(boxes || []); }
+  setTransientLights(lights) { this.transient = lights || []; }
+  setSprites(list) { this.spriteList = list || []; }
 
-  /** Per-frame geometry. Small enough that re-uploading it costs nothing. */
-  setDynamic(boxes) {
-    this.dynamic.upload(boxes || []);
-  }
-
-  /**
-   * Lights that only exist for this frame - muzzle flashes, flying shots, the
-   * glow of a monster winding up. They compete with the torches for the eight
-   * slots, so the nearest still win.
-   */
-  setTransientLights(lights) {
-    this.transient = lights || [];
-  }
-
+  /** Low internal resolution, scaled up by CSS. The pixels are the aesthetic. */
   resize() {
     const rect = this.canvas.getBoundingClientRect();
-    const ratio = window.devicePixelRatio || 1;
-    this.canvas.width = Math.max(1, Math.floor(rect.width * ratio));
-    this.canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+    const aspect = Math.max(0.2, rect.width / Math.max(1, rect.height));
+    this.canvas.height = PIXEL_HEIGHT;
+    this.canvas.width = Math.max(1, Math.round(PIXEL_HEIGHT * aspect));
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
   }
 
-  /** Upload the torches nearest the camera; distant ones cannot be seen anyway. */
-  uploadLights(eye, dt) {
+  /** Pick the torches nearest the camera; distant ones cannot be seen anyway. */
+  gatherLights(eye, dt) {
     this.time += dt;
     const near = [];
     for (const light of this.lights) {
@@ -294,7 +433,7 @@ export class Renderer {
       if (d > 900) continue;
       near.push({ light, d });
     }
-    for (const light of this.transient || []) {
+    for (const light of this.transient) {
       const d = (light.pos[0] - eye[0]) ** 2 + (light.pos[1] - eye[1]) ** 2 + (light.pos[2] - eye[2]) ** 2;
       if (d > 900) continue;
       // Transient lights are the reason you look up, so bias them forward.
@@ -311,7 +450,6 @@ export class Renderer {
         continue;
       }
       const { light } = entry;
-      // A little flicker per light, offset by position so they are out of phase.
       const phase = light.pos[0] * 0.7 + light.pos[2] * 1.3;
       const flicker = 0.86 + 0.14 * Math.sin(this.time * 7.3 + phase) * Math.sin(this.time * 3.1 + phase * 0.6);
       this.lightPos[i * 3] = light.pos[0];
@@ -322,23 +460,32 @@ export class Renderer {
       this.lightColor[i * 3 + 2] = light.color[2];
       this.lightPower[i] = light.intensity * flicker * 1.9;
     }
+  }
+
+  applyUniforms(loc, vp, eye) {
     const g = this.gl;
-    g.uniform3fv(this.loc.lightPos, this.lightPos);
-    g.uniform3fv(this.loc.lightColor, this.lightColor);
-    g.uniform1fv(this.loc.lightPower, this.lightPower);
+    g.uniformMatrix4fv(loc.vp, false, vp);
+    g.uniform3fv(loc.eye, new Float32Array(eye));
+    g.uniform3fv(loc.lightPos, this.lightPos);
+    g.uniform3fv(loc.lightColor, this.lightColor);
+    g.uniform1fv(loc.lightPower, this.lightPower);
+    g.uniform3fv(loc.fog, new Float32Array(this.mode === 'fps' ? [0.020, 0.024, 0.030] : [0.03, 0.035, 0.045]));
+    g.uniform1f(loc.ambient, this.mode === 'fps' ? 0.10 : 0.92);
+    g.uniform1f(loc.fogStart, this.mode === 'fps' ? 9.0 : 90.0);
+    g.uniform1f(loc.fogRange, this.mode === 'fps' ? 40.0 : 160.0);
   }
 
   render(player, dt) {
     const g = this.gl;
     g.clear(g.COLOR_BUFFER_BIT | g.DEPTH_BUFFER_BIT);
-    g.useProgram(this.program);
 
-    let eye;
-    let target;
     const shake = this.shake || 0;
     const jitter = shake > 0
       ? [(Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake]
       : [0, 0, 0];
+
+    let eye;
+    let target;
     if (this.mode === 'fps') {
       eye = [player.x + jitter[0], player.y + player.eye + jitter[1], player.z + jitter[2]];
       const cp = Math.cos(player.pitch);
@@ -360,16 +507,31 @@ export class Renderer {
 
     const aspect = this.canvas.width / Math.max(1, this.canvas.height);
     const projection = perspective(this.mode === 'fps' ? this.fov : Math.PI / 3.2, aspect, 0.06, 400);
-    g.uniformMatrix4fv(this.loc.vp, false, multiply(projection, lookAt(eye, target)));
-    g.uniform3fv(this.loc.eye, new Float32Array(eye));
-    g.uniform3fv(this.loc.fog, new Float32Array(this.mode === 'fps' ? [0.020, 0.024, 0.030] : [0.03, 0.035, 0.045]));
-    g.uniform1f(this.loc.ambient, this.mode === 'fps' ? 0.10 : 0.92);
-    g.uniform1f(this.loc.fogStart, this.mode === 'fps' ? 9.0 : 90.0);
-    g.uniform1f(this.loc.fogRange, this.mode === 'fps' ? 40.0 : 160.0);
-    this.uploadLights(eye, dt);
+    const vp = multiply(projection, lookAt(eye, target));
+    this.gatherLights(eye, dt);
 
-    (this.mode === 'fps' ? this.world : this.cutaway).draw(this.loc);
-    this.dynamic.draw(this.loc);
-    this.overlay.draw(this.loc);
+    g.useProgram(this.worldProgram);
+    this.applyUniforms(this.worldLoc, vp, eye);
+    (this.mode === 'fps' ? this.world : this.cutaway).draw(this.worldLoc);
+    this.dynamic.draw(this.worldLoc);
+    this.overlay.draw(this.worldLoc);
+
+    if (this.atlas && this.spriteList && this.spriteList.length) {
+      // Billboards face the camera's horizontal right; sprites stay upright.
+      const toEye = [eye[0] - target[0], eye[2] - target[2]];
+      const len = Math.hypot(toEye[0], toEye[1]) || 1;
+      const forward = [-toEye[0] / len, -toEye[1] / len];
+      const right = [-forward[1], 0, forward[0]];
+      this.sprites.upload(this.spriteList, right);
+      g.useProgram(this.spriteProgram);
+      this.applyUniforms(this.spriteLoc, vp, eye);
+      g.activeTexture(g.TEXTURE0);
+      g.bindTexture(g.TEXTURE_2D, this.atlas);
+      g.uniform1i(this.spriteLoc.atlas, 0);
+      g.uniform3fv(this.spriteLoc.facing, new Float32Array([-forward[0], 0, -forward[1]]));
+      this.sprites.draw(this.spriteLoc);
+    }
   }
 }
+
+export { PIXEL_HEIGHT };

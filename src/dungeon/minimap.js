@@ -53,16 +53,17 @@ export class AutoMap {
   }
 
   draw(dungeon, player, floorIndex, options = {}) {
-    const rect = this.canvas.getBoundingClientRect();
-    const ratio = window.devicePixelRatio || 1;
-    const w = Math.max(1, Math.floor(rect.width * ratio));
-    const h = Math.max(1, Math.floor(rect.height * ratio));
-    if (this.canvas.width !== w || this.canvas.height !== h) {
-      this.canvas.width = w;
-      this.canvas.height = h;
+    // A fixed low backing-store size, scaled up by CSS, so the map is drawn with
+    // the same size pixels as the rest of the screen.
+    const size = this.pixelSize || 104;
+    if (this.canvas.width !== size || this.canvas.height !== size) {
+      this.canvas.width = size;
+      this.canvas.height = size;
     }
+    const rect = { width: size, height: size };
     const c = this.ctx;
-    c.setTransform(ratio, 0, 0, ratio, 0, 0);
+    c.setTransform(1, 0, 0, 1, 0, 0);
+    c.imageSmoothingEnabled = false;
     c.fillStyle = '#05080b';
     c.fillRect(0, 0, rect.width, rect.height);
 
@@ -101,7 +102,7 @@ export class AutoMap {
       const [ex, ez] = stair.exit;
       if (!revealAll && mask && !mask[ez * plan.width + ex]) continue;
       c.fillStyle = '#6fe0f5';
-      c.font = `bold ${Math.max(8, scale * 1.4)}px Segoe UI, sans-serif`;
+      c.font = `bold ${Math.max(5, scale * 1.5)}px monospace`;
       c.textAlign = 'center';
       c.textBaseline = 'middle';
       c.fillText('▼', ox + (ex + 0.5) * scale, oz + (ez + 0.5) * scale);
@@ -135,7 +136,7 @@ export class AutoMap {
     const goal = dungeon.roomsById.get(dungeon.goal);
     if (goal && goal.floor === floorIndex && (revealAll || !mask || mask[goal.cz * plan.width + goal.cx])) {
       c.fillStyle = '#ff8b6b';
-      c.font = `bold ${Math.max(9, scale * 1.6)}px Segoe UI, sans-serif`;
+      c.font = `bold ${Math.max(6, scale * 1.7)}px monospace`;
       c.textAlign = 'center';
       c.textBaseline = 'middle';
       c.fillText('✦', ox + (goal.cx + 0.5) * scale, oz + (goal.cz + 0.5) * scale);
@@ -150,16 +151,16 @@ export class AutoMap {
     const rz = Math.sin(player.yaw);
     c.fillStyle = '#ffd166';
     c.beginPath();
-    c.moveTo(px + fx * 7, pz + fz * 7);
-    c.lineTo(px - fx * 4 + rx * 4, pz - fz * 4 + rz * 4);
-    c.lineTo(px - fx * 4 - rx * 4, pz - fz * 4 - rz * 4);
+    c.moveTo(px + fx * 5, pz + fz * 5);
+    c.lineTo(px - fx * 3 + rx * 3, pz - fz * 3 + rz * 3);
+    c.lineTo(px - fx * 3 - rx * 3, pz - fz * 3 - rz * 3);
     c.closePath();
     c.fill();
 
     c.fillStyle = '#9facb8';
-    c.font = '11px Segoe UI, sans-serif';
+    c.font = 'bold 7px monospace';
     c.textAlign = 'left';
     c.textBaseline = 'top';
-    c.fillText(`DEPTH ${floorIndex + 1} · ${plan.theme.name}`, 7, 6);
+    c.fillText(`D${floorIndex + 1}`, 3, 3);
   }
 }
