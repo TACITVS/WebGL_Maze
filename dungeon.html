@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Nexus Depths — 3D Roguelike Dungeon Generator</title>
+  <link rel="stylesheet" href="./styles/dungeon.css" />
+</head>
+<body>
+  <div class="app">
+    <section class="main">
+      <div class="toolbar">
+        <div class="brand">Nexus Depths · procedural 3D dungeon</div>
+        <label>Seed <input id="seed" type="number" value="31337" style="width:96px" /></label>
+        <button id="regen" class="primary">Generate</button>
+        <button id="reroll">Random seed</button>
+        <button id="mode">Cutaway view</button>
+        <button id="solution">Show route</button>
+        <button id="autowalk">Auto-walk</button>
+        <button id="validate">Validate</button>
+        <label title="Mouse-look sensitivity">Mouse
+          <input id="sensitivity" type="range" min="0.4" max="2.4" step="0.05" value="1" style="width:80px;vertical-align:middle" />
+        </label>
+        <label title="Reverse vertical mouse look"><input id="invertY" type="checkbox" /> Invert Y</label>
+      </div>
+
+      <div class="viewport" id="viewport">
+        <canvas id="gl"></canvas>
+        <div class="cross" id="cross"></div>
+        <div class="objective" id="objective"></div>
+        <div class="mapwrap"><canvas id="map"></canvas></div>
+        <div class="hud" id="hud">Click the view to capture the mouse · WASD move · Shift run · M cutaway · Esc release</div>
+      </div>
+
+      <div class="status" id="status"></div>
+    </section>
+
+    <aside class="side">
+      <h2>Dungeon invariants</h2>
+      <div class="checks" id="checks"></div>
+
+      <h3>How the layout is made</h3>
+      <div class="copy">
+        Each floor is a tile map. A <strong>BSP partition</strong> chops it into uneven leaves, a room of random
+        size and shape is carved into most of them, and a few leaves stay solid rock so the floor has
+        negative space. A <strong>minimum spanning tree</strong> over the room centres becomes corridors,
+        plus extra links so the dungeon has loops rather than being one branching tree.
+      </div>
+
+      <h3>The third dimension</h3>
+      <div class="copy">
+        Floors are stitched together by <strong>switchback stair towers</strong>, dropped wherever a room on one
+        floor overlaps a room on the next. A tower punches a stairwell through the upper floor, stands
+        as a walled tower on the lower one, and is entered only through its mouth. Placement is rejected
+        unless both floors stay fully connected without routing through the tower.
+      </div>
+
+      <h3>Making it a dungeon</h3>
+      <div class="copy">
+        Rooms are typed from their size and their place in the graph — entrance, vaults on dead ends,
+        crypts, cisterns, a boss chamber at the deepest point — and furnished accordingly. Locks are
+        placed only on <strong>bridges of the room graph</strong>, and each key is hidden in the region still
+        reachable without it, so every dungeon is solvable by construction.
+      </div>
+
+      <h3>Validation</h3>
+      <div class="copy">
+        The checks above do not trust the generator. They flood-fill the compiled world with the same
+        collision query the player's own movement uses, so a pass means a person can really walk from
+        the entrance to the goal — not merely that a hand-drawn centreline happens to be supported.
+      </div>
+
+      <h3>Diagnostics</h3>
+      <div class="log" id="log"></div>
+    </aside>
+  </div>
+
+  <script type="module">
+    import { DungeonApp } from './src/dungeon/app.js';
+    window.__dungeon = new DungeonApp();
+  </script>
+</body>
+</html>

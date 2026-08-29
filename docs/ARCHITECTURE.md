@@ -4,6 +4,10 @@ This document provides an in-depth description of the Nexus Maze codebase. It co
 how modules cooperate, details every class, and explains the responsibility of each
 significant function.
 
+The procedural 3D dungeon generator under `src/dungeon/` is a separate prototype
+with its own entry point (`dungeon.html`); it is documented in
+[DUNGEON_GENERATION.md](./DUNGEON_GENERATION.md).
+
 ## Application startup flow
 
 1. **`index.html`** loads the external Three.js and Tone.js bundles and then imports
