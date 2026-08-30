@@ -582,6 +582,15 @@ export class Game {
       if (s.aim !== 'orbit') continue;
       weapon.orbitPhase += dt * (s.speed * (1 + this.loadout.stats.haste));
       if (!weapon.hitClock) weapon.hitClock = new Map();
+      // Forget enemies past the re-hit window. Without this the map keeps an
+      // entry for every body an orbit has ever brushed - thousands over a long
+      // run, none of which can ever matter again.
+      if (weapon.hitClock.size > 256) {
+        const stale = this.swarm.clock - 1;
+        for (const [id, when] of weapon.hitClock) {
+          if (when < stale) weapon.hitClock.delete(id);
+        }
+      }
       const radius = 2.1 * bonus;
       for (let i = 0; i < s.count; i += 1) {
         const angle = weapon.orbitPhase + (i / s.count) * Math.PI * 2;
@@ -599,7 +608,12 @@ export class Game {
           const dir = [enemy.x - this.player.x, enemy.z - this.player.z];
           const len = Math.hypot(dir[0], dir[1]) || 1;
           const damage = s.damage * (1 + this.loadout.stats.damage);
-          this.swarm.applyImpact({ x, y, z, damage, weapon: s, colour: s.colour }, enemy, hooks);
+          // The floor and the area-scaled blast go in here too: applyImpact now
+          // filters splash and chain by floor, and reads its radius off this.
+          this.swarm.applyImpact({
+            x, y, z, damage, weapon: s, colour: s.colour,
+            floor: floorIndex, blast: s.blast * bonus,
+          }, enemy, hooks);
           this.swarm.hurt(enemy, damage, [dir[0] / len, dir[1] / len], hooks);
           this.swarm.burst(x, y, z, s.trail, 3);
           this.audio.play(s.sfx, { pitch: 0.9 + Math.random() * 0.4, spacing: 0.05 });

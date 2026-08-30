@@ -313,6 +313,49 @@ blitting it, plus writing the damage-flash inline style only when it changes
 rather than every frame, took the HUD to 0.85 ms and the whole frame's
 JavaScript to about 2.0 ms.
 
+### Five bugs found by reading the code against its own rules
+
+A later audit, prompted by the game simply feeling *odd* to play, turned up five
+defects that neither the simulation nor the browser tests were asking about. The
+first two are the ones a player feels.
+
+1. **Splash and chain damage passed through floors.** `nearby()` is a flat 2D
+   spatial hash - it answers "what is near this x/z" across every floor at once,
+   because separation only ever asked within one floor and filtered afterwards.
+   Splash and chain forgot to filter. Floors are 4.8 m apart, and a shell
+   bursting on one killed whatever stood at the same x/z on the next one down.
+   Worse, those kills counted toward the quota while their essence dropped on a
+   floor the player was not on to collect: the bar filled from kills you never
+   saw and never got paid for. `nearestTo` and `targetFor` in the same file
+   filter correctly, which is what marked it as an oversight rather than intent.
+
+2. **One auto-aim lock in five was through a wall.** `targetFor` ranked
+   candidates by facing and distance and never asked whether it could see them.
+   Sampled across five seeds on a populated floor: 398 of 2,000 locks were
+   behind solid rock. With weapons that fire themselves, that is a fifth of all
+   damage spent shooting masonry, with the impact sounds and lights to match.
+   Sight is now tested lazily down the ranked list and capped at six rays, and
+   returning nothing is a real answer - the caller then fires straight ahead,
+   which is where the player is looking anyway.
+
+3. **Blast radius silently ignored the area stat.** `const radius = s.blast *
+   (1 + 0);` - a placeholder never filled in. The radius is now baked onto the
+   projectile at fire time, where the bonus is actually known.
+
+4. **Seeded runs did not reproduce.** Crit rolls used `Math.random()` rather
+   than the seeded stream, so the same seed gave a different run. Every other
+   `Math.random()` in the gameplay files is cosmetic - particle scatter, audio
+   pitch, sprite bob - and this one was the exception.
+
+5. **Orbit weapons leaked memory.** `hitClock` recorded every enemy id an orbit
+   had ever touched and never dropped one, growing without bound across the
+   thousands of kills a long run produces.
+
+One suspicion did *not* survive checking: the player runs on a fixed 1/120
+timestep while the swarm runs on the frame delta, which looked like a desync
+waiting to happen. Both advance by the same accumulated time, so they stay in
+step; it is a difference in integration granularity, not a bug.
+
 The general lesson is the one the generator taught first: **a bot that replays
 the player's own rules finds faults inspection cannot.** The original prototype's
 validator sampled a hand-authored centreline and passed 200/200 while producing
