@@ -66,10 +66,23 @@ Two rules keep the offer honest:
 
 ## Mechanics
 
-**Movement** — WASD, `Shift` to sprint. Crawlers run at 4.35 m/s and you walk at
-3.9, so **walking is never an escape and sprinting always is**. That is a
-deliberate line: the horde closes on anyone who stands and shoots, and breaking
-away is always available and always costs you your firing position.
+**Movement** — WASD, `Shift` to sprint, 5.7 m/s and 8.4 m/s. You outrun the
+horde in open ground; the threat is **being surrounded, not being outpaced**.
+
+This was originally the other way round — 3.9 m/s against a crawler's 4.35, on
+the theory that "walking is never an escape and sprinting always is". It read
+well and played terribly. Being slower than the thing chasing you does not make
+the game tense, it makes Shift mandatory, and a game you must hold a key to play
+at a normal speed feels sluggish in the hand no matter what the design note says.
+Encirclement is the better pressure and the one a bullet heaven is built on: the
+spawner rings you at five to thirty metres in every direction and the floor
+ceiling climbs past a hundred bodies, so the danger is where they are, not how
+fast they run.
+
+**Looking** — raw mouse deltas with no smoothing and no acceleration, the same
+sensitivity on both axes, and a pitch limit just short of vertical. Sensitivity
+and invert-Y are on the pause screen and persist between runs; a fixed
+sensitivity fits nobody's mouse.
 
 **Auto-fire** — every weapon fires on its own cooldown at whatever is in front
 of you, with a generous aim cone. You never click to shoot.
@@ -82,6 +95,12 @@ heavy knockback. The panic button: it buys space rather than kills.
 
 **Charge** regenerates at 19/s. Health does not regenerate — it comes from
 drops, from descending, and from levelling.
+
+**The card screen hands the pointer back** and you click the card you want.
+While the pointer stayed locked the only mouse affordance was "any click takes
+card one" — and since the left button is also the surge, a level-up arriving
+mid-fight was routinely spent before it could be read. There is a short grace
+period too, so a click already in flight cannot buy anything.
 
 **Levelling heals a quarter of what is missing**, not a flat amount. Near death a
 level is a genuine rescue; at full hull it is worth nothing. The flat version did
@@ -282,6 +301,17 @@ at 98 live monsters, so the frame budget is spent on rasterisation, not on AI.
 The Warden was measured separately, against builds a level-twenty run actually
 produces: it now takes 12–39 seconds and 10–74 hull to kill, against 2.5–5.9
 seconds before it was scaled.
+
+### Where the frame actually goes
+
+Profiling per subsystem, with 89 monsters live, found the cost was not where it
+looked. The HUD was **1.39 ms a frame — more than rendering the entire 3D world
+beside it**, and 58% of all JavaScript. The bitmap font drew one `fillRect` per
+lit pixel, up to seventy per character once the shadow pass is counted, and the
+HUD is redrawn every frame. Painting each glyph once into a small canvas and
+blitting it, plus writing the damage-flash inline style only when it changes
+rather than every frame, took the HUD to 0.85 ms and the whole frame's
+JavaScript to about 2.0 ms.
 
 The general lesson is the one the generator taught first: **a bot that replays
 the player's own rules finds faults inspection cannot.** The original prototype's
