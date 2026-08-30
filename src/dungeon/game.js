@@ -65,7 +65,11 @@ const DEPTH_NAMES = ['Flooded Undercroft', 'Bone Galleries', 'Verdigris Works', 
 
 /** Essence needed for the next level. Early ones land fast on purpose. */
 function xpForLevel(level) {
-  return Math.round(9 + Math.pow(level, 1.55) * 4.2);
+  // The first few still land quickly, because a build needs to get going, but
+  // the curve climbs much faster after that. The old one was near-linear in
+  // practice against a kill rate that grows all run, which is how a four-minute
+  // run produced thirty levels - an upgrade every eight seconds.
+  return Math.round(14 + Math.pow(level, 1.95) * 6.5);
 }
 
 export class Game {
@@ -102,6 +106,14 @@ export class Game {
     this.sensitivity = this.loadSetting('nexusDepthsSens', LOOK.defaultSensitivity,
       LOOK.minSensitivity, LOOK.maxSensitivity);
     this.invertY = this.loadSetting('nexusDepthsInvertY', 0, 0, 1) === 1;
+    // 'auto' keeps the bullet-heaven feel; 'manual' makes it a shooter you
+    // drive. The mode changes what the left button does, so it is bound once
+    // here and read everywhere rather than branched at each call site.
+    let mode = 'auto';
+    try { mode = localStorage.getItem('nexusDepthsFireMode') || 'auto'; } catch { mode = 'auto'; }
+    this.fireMode = mode === 'manual' ? 'manual' : 'auto';
+    this.firing = false;
+    this.hasTarget = false;
     this.lastFrame = performance.now();
     this.accumulator = 0;
     this.stepSeconds = 1 / 120;
@@ -187,6 +199,7 @@ export class Game {
     this.bossState = null;
     this.compass = null;
     this.pendingCards = null;
+    this.banked = 0;
     this.orbits = [];
     this.muzzle = null;
     this.combo = 0;
@@ -268,6 +281,17 @@ export class Game {
         this.saveSetting('nexusDepthsSens', this.sensitivity);
       });
     }
+    const auto = document.getElementById('autoFireInput');
+    if (auto) {
+      auto.checked = this.fireMode === 'auto';
+      auto.addEventListener('change', () => {
+        this.fireMode = auto.checked ? 'auto' : 'manual';
+        this.firing = false;
+        this.surging = false;
+        try { localStorage.setItem('nexusDepthsFireMode', this.fireMode); } catch { /* private mode */ }
+      });
+    }
+
     const invert = document.getElementById('invertInput');
     if (invert) {
       invert.checked = this.invertY;
@@ -295,12 +319,15 @@ export class Game {
       }
       if (this.state !== 'playing') return;
       if (document.pointerLockElement !== this.el.canvas) { this.el.canvas.requestPointerLock?.(); return; }
-      if (e.button === 0) this.surging = true;
+      if (e.button === 0) {
+        if (this.fireMode === 'manual') this.firing = true;
+        else this.surging = true;
+      }
       if (e.button === 2) { this.blasting = true; e.preventDefault(); }
     });
     this.el.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.surging = false;
+      if (e.button === 0) { this.surging = false; this.firing = false; }
       if (e.button === 2) this.blasting = false;
     });
 
@@ -309,6 +336,7 @@ export class Game {
       if (!this.pointerLocked) {
         this.keys.clear();
         this.surging = false;
+        this.firing = false;
         this.blasting = false;
         if (this.state === 'playing') this.setPaused(true);
       }
@@ -336,6 +364,7 @@ export class Game {
         if (index >= 0) { this.chooseCard(index); e.preventDefault(); }
         return;
       }
+      if (e.code === 'Tab') { this.openCards(); e.preventDefault(); return; }
       if (e.code === 'Escape') { if (this.state === 'playing') this.setPaused(true); return; }
       if (e.code === 'KeyR' && (this.state === 'dead' || this.state === 'victory')) { this.startRun(this.seed); return; }
       if (e.code === 'Enter' && this.state === 'title') { document.getElementById('startBtn').click(); return; }
@@ -348,7 +377,12 @@ export class Game {
       if (e.code === 'Space') this.blasting = false;
     });
 
-    window.addEventListener('blur', () => { this.keys.clear(); this.surging = false; this.blasting = false; });
+    window.addEventListener('blur', () => {
+      this.keys.clear();
+      this.surging = false;
+      this.firing = false;
+      this.blasting = false;
+    });
   }
 
   setPaused(on) {
@@ -409,31 +443,50 @@ export class Game {
     this.xp += gained;
     this.score += Math.round(gained * 2 * this.comboScoreMult());
     this.audio.play('essence', { pitch: 0.9 + Math.random() * 0.5, spacing: 0.02 });
-    while (this.xp >= this.xpNeeded && !this.pendingCards) this.levelUp();
+    while (this.xp >= this.xpNeeded) this.levelUp();
   }
 
+  /**
+   * Bank a level. It does NOT open the card screen.
+   *
+   * It used to, and at one level every eight seconds that meant a full-screen
+   * modal seizing the game mid-fight, over and over. The choice is the good
+   * part of the loop; being interrupted to make it is not. So a level parks an
+   * upgrade, the HUD says one is waiting, and you spend it when there is a
+   * lull - or stack several and spend them together.
+   */
   levelUp() {
     this.xp -= this.xpNeeded;
     this.level += 1;
     this.xpNeeded = xpForLevel(this.level);
+    this.banked = (this.banked || 0) + 1;
     // A share of what is missing, not a flat top-up. Near death a level is a
     // genuine rescue; at full hull it is worth nothing. A flat heal did the
     // opposite - levels arrive fastest when you are killing well, so the flat
     // version pinned a strong build at maximum hull and the fight stopped
     // being able to threaten it at all.
     this.player.hull += (this.maxHull() - this.player.hull) * 0.25;
+    this.shake = Math.max(this.shake, 0.12);
+    this.audio.play('levelUp', { force: true });
+    this.toast(`LEVEL ${this.level} - UPGRADE READY`, 'good');
+  }
+
+  /** Open the banked choice. Bound to Tab, and to the HUD prompt. */
+  openCards() {
+    if (this.state !== 'playing' || !this.banked) return;
     this.pendingCards = this.loadout.offer(this.deepest);
+    if (!this.pendingCards.length) { this.banked = 0; return; }
     this.state = 'levelup';
     // Hand the cursor back so the choice is a real click on a real card.
     // While the pointer was locked the only mouse affordance was "any click
-    // takes card one", and since the left button is also the surge, a level-up
-    // arriving mid-fight was dismissed before it could be read.
+    // takes card one", and since the left button is also the surge, a card
+    // screen arriving mid-fight was dismissed before it could be read.
     this.cardsShownAt = performance.now();
     this.hoverCard = -1;
+    this.firing = false;
+    this.surging = false;
     document.exitPointerLock?.();
     document.body.classList.add('choosing');
-    this.shake = Math.max(this.shake, 0.12);
-    this.audio.play('levelUp', { force: true });
     this.audio.setIntensity(0.2);
   }
 
@@ -443,6 +496,7 @@ export class Game {
     if (!card) return;
     this.loadout.take(card);
     this.player.hull = Math.min(this.maxHull(), this.player.hull);
+    this.banked = Math.max(0, (this.banked || 0) - 1);
     this.pendingCards = null;
     this.hoverCard = -1;
     this.state = 'playing';
@@ -554,7 +608,20 @@ export class Game {
   }
 
   /** Every weapon that is off cooldown, fired where you are looking. */
-  autoFire(dt, floorIndex) {
+  /**
+   * Run the weapons.
+   *
+   * Two things gate a shot. In MANUAL mode you have to be holding the trigger,
+   * because a gun that fires whether or not you asked it to is not a weapon,
+   * it is a noise. In AUTO mode there has to be something to shoot at: the old
+   * behaviour fired every weapon on cooldown forever, so the very first thing
+   * a new player saw was a pistol emptying itself into an empty room with no
+   * way to stop it.
+   *
+   * `ignoreGate` is for the surge, which is an explicit button press and so is
+   * allowed to fire into nothing if that is what the player asked for.
+   */
+  autoFire(dt, floorIndex, ignoreGate = false) {
     const haste = 1 + this.loadout.stats.haste;
     const bonus = {
       damage: this.loadout.stats.damage,
@@ -563,12 +630,23 @@ export class Game {
     };
     const origin = this.eyePoint();
     const forward = this.viewDirection();
+
+    // One sight lookup for the whole volley rather than one per weapon.
+    const target = this.swarm.targetFor(origin, forward, floorIndex);
+    this.hasTarget = target !== null;
+
+    let allowed = ignoreGate;
+    if (!allowed) allowed = this.fireMode === 'manual' ? this.firing : this.hasTarget;
+
     for (const weapon of this.loadout.weapons) {
       if (weapon.stats.aim === 'orbit') continue;
+      // Cooldowns always tick, so switching modes or finding a target does not
+      // hand you a stockpiled volley.
       weapon.cooldownLeft -= dt * haste;
+      if (!allowed) { weapon.cooldownLeft = Math.max(0, weapon.cooldownLeft); continue; }
       if (weapon.cooldownLeft > 0) continue;
       weapon.cooldownLeft += Math.max(0.08, weapon.stats.cooldown);
-      this.swarm.fireWeapon(weapon, origin, forward, floorIndex, bonus, this.combatHooks());
+      this.swarm.fireWeapon(weapon, origin, forward, floorIndex, bonus, this.combatHooks(), target);
     }
   }
 
@@ -628,7 +706,7 @@ export class Game {
     this.player.regenHold = 0.4;
     this.surgeCooldown = SURGE.cooldown;
     for (const weapon of this.loadout.weapons) weapon.cooldownLeft = 0;
-    this.autoFire(0, floorIndex);
+    this.autoFire(0, floorIndex, true);
     this.shake = Math.max(this.shake, 0.1);
     this.audio.play('surge', { force: true });
   }
@@ -881,6 +959,7 @@ export class Game {
         ready: w.cooldownLeft <= 0.05,
       })),
       relics: this.loadout.relics.length,
+      banked: this.banked || 0,
       compass: this.compass,
       boss: this.bossState,
       hitmark: this.hitmarkTimer,
@@ -927,7 +1006,7 @@ export class Game {
     }
     this.updateMovement(dt);
     this.autoFire(dt, floorIndex);
-    if (this.surging) this.fireSurge(floorIndex);
+    if (this.surging && this.fireMode === 'auto') this.fireSurge(floorIndex);
     if (this.blasting) { this.fireBlast(floorIndex); this.blasting = false; }
   }
 

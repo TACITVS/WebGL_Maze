@@ -85,6 +85,9 @@ export class Hud {
   }
 
   advance(dt) {
+    // A wall clock for anything that pulses. Kept here rather than read from
+    // the game so the HUD animates on its own terms.
+    this.clock = (this.clock || 0) + dt;
     for (const t of this.toasts) t.age += dt;
     this.toasts = this.toasts.filter((t) => t.age < 2.2);
     if (this.bannerState) {
@@ -308,6 +311,24 @@ export class Hud {
       { scale: 3, colour: PALETTE.ink, align: 'right', shadow: PALETTE.shadow });
     drawText(c, `LEVEL ${state.level}`, W - 8, 41,
       { scale: 1, colour: PALETTE.gold, align: 'right', shadow: PALETTE.shadow });
+
+    // --- banked upgrades ---------------------------------------------------
+    // Loud enough that you know it is there, quiet enough that it never takes
+    // the screen away from you mid-fight.
+    if (state.banked > 0) {
+      const label = state.banked > 1 ? `${state.banked} UPGRADES READY` : 'UPGRADE READY';
+      const w = textWidth(label, 1) + 10;
+      const x = Math.round(cx - w / 2);
+      const y = Math.round(H * 0.62);
+      const pulse = 0.55 + 0.45 * Math.sin(this.clock * 5);
+      c.globalAlpha = pulse;
+      c.fillStyle = PALETTE.gold;
+      c.fillRect(x, y - 2, w, 1);
+      c.fillRect(x, y + 11, w, 1);
+      c.globalAlpha = 1;
+      drawText(c, label, cx, y + 2, { scale: 1, colour: PALETTE.gold, align: 'center', shadow: PALETTE.shadow });
+      drawText(c, 'PRESS TAB', cx, y + 14, { scale: 1, colour: PALETTE.dim, align: 'center', shadow: PALETTE.shadow });
+    }
 
     // --- kill chain --------------------------------------------------------
     // Only shown once it means something, and it drains in plain sight: the

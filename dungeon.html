@@ -28,16 +28,17 @@
             <h3>CONTROLS</h3>
             <div class="line"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> MOVE</div>
             <div class="line"><kbd>SHIFT</kbd> SPRINT</div>
-            <div class="line"><b>L-CLICK</b> SURGE</div>
+            <div class="line"><b>L-CLICK</b> SHOOT / SURGE</div>
             <div class="line"><b>R-CLICK</b>/<kbd>SPC</kbd> BLAST</div>
-            <div class="line"><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> CHOOSE UPGRADE</div>
-            <div class="line"><kbd>ESC</kbd> PAUSE</div>
+            <div class="line"><kbd>TAB</kbd> SPEND UPGRADE</div>
+            <div class="line"><kbd>ESC</kbd> PAUSE &amp; OPTIONS</div>
           </div>
           <div class="col">
             <h3>MISSION</h3>
-            <div class="line">YOUR WEAPONS FIRE THEMSELVES</div>
+            <div class="line">WEAPONS AUTO-FIRE ON TARGET</div>
+            <div class="line">(TOGGLE IN <kbd>ESC</kbd> OPTIONS)</div>
             <div class="line">KILLS DROP <b>ESSENCE</b></div>
-            <div class="line">EVERY LEVEL OFFERS 3 CARDS</div>
+            <div class="line">UPGRADES WAIT FOR <kbd>TAB</kbd></div>
             <div class="line">PURGE THE QUOTA TO DESCEND</div>
             <div class="line">DEPTH 4 HOLDS THE WARDEN</div>
           </div>
@@ -59,6 +60,10 @@
         <h2>PAUSED</h2>
         <p class="tag">THE DUNGEON WAITS.</p>
         <div class="settings">
+          <label class="check">
+            <input id="autoFireInput" type="checkbox" />
+            <span>AUTO-FIRE (OFF = LEFT CLICK TO SHOOT)</span>
+          </label>
           <label class="slider">
             <span>LOOK SENSITIVITY</span>
             <input id="sensInput" type="range" min="6" max="100" step="1" />

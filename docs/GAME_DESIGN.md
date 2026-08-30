@@ -16,8 +16,10 @@ One floor is one turn of the loop:
 
 1. **Purge the quota** — 34 kills on depth 1, rising by 22 each floor. Every
    kill drops essence; essence fills a bar across the bottom of the screen.
-2. **Level** whenever the bar fills, which is every few seconds. Time stops and
-   three procedurally generated capabilities are dealt face up. Press 1, 2 or 3.
+2. **Level** whenever the bar fills. This does *not* interrupt you: the upgrade
+   is banked and the HUD says one is waiting. Press `Tab` in a lull to see three
+   procedurally generated capabilities and take one with a click or 1/2/3.
+   Upgrades stack, so you can bank several and spend them together.
 3. **The rift opens** when the quota is met, and the compass points at it.
 4. **Choose**: descend, which heals you 30, refills your charge and pays 1200 —
    or stay. Staying is how you get stronger. Staying is also how you die: the
@@ -84,17 +86,37 @@ sensitivity on both axes, and a pitch limit just short of vertical. Sensitivity
 and invert-Y are on the pause screen and persist between runs; a fixed
 sensitivity fits nobody's mouse.
 
-**Auto-fire** — every weapon fires on its own cooldown at whatever is in front
-of you, with a generous aim cone. You never click to shoot.
+**Firing** — two modes, toggled in the pause options and remembered between
+runs.
 
-**Surge** (left click, 26 charge) — resets every weapon's cooldown and fires the
-whole rack at once. The alpha strike.
+- **Auto** (default): weapons fire on their own cooldown at whatever is in
+  front of you, **but only when there is something to shoot**. They will not
+  empty themselves into an empty room.
+- **Manual**: weapons fire only while you hold the left button. Same cooldowns,
+  same auto-aim, you choose when.
+
+Auto-fire originally had no off switch and no target check, so the first thing a
+new player met was a pistol firing into an empty corridor that could not be
+stopped. A gun that shoots whether or not you asked it to is not a weapon, it is
+a noise.
+
+**Surge** (left click, auto mode only, 26 charge) — resets every weapon's
+cooldown and fires the whole rack at once. In manual mode the left button is
+already the volley, so there is nothing for a surge to add.
 
 **Blast** (right click / `Space`, 38 charge) — 60 damage in a 4.2 m radius with
 heavy knockback. The panic button: it buys space rather than kills.
 
 **Charge** regenerates at 19/s. Health does not regenerate — it comes from
 drops, from descending, and from levelling.
+
+**The card screen never opens by itself.** A level banks an upgrade; you spend
+it with `Tab` when it suits you. It used to seize the screen the instant the bar
+filled, and at the old curve that was an upgrade every eight seconds - roughly
+thirty full-screen interruptions in a four-minute run. The choice is the good
+part of the loop; being interrupted to make it is not. The curve is also much
+steeper now (`14 + level^1.95 * 6.5`), which puts upgrades about twenty seconds
+apart rather than eight.
 
 **The card screen hands the pointer back** and you click the card you want.
 While the pointer stayed locked the only mouse affordance was "any click takes

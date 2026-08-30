@@ -546,13 +546,15 @@ export class Swarm {
    * Fire one weapon. The core decides the aim pattern, so adding a new firing
    * shape means adding a case here and nothing else.
    */
-  fireWeapon(weapon, origin, forward, floorIndex, bonus, hooks) {
+  fireWeapon(weapon, origin, forward, floorIndex, bonus, hooks, knownTarget) {
     const s = weapon.stats;
     const damage = s.damage * (1 + (bonus.damage || 0));
     const size = s.size * (1 + (bonus.area || 0));
-    const target = (s.aim === 'nearest' || s.aim === 'target')
-      ? this.targetFor(origin, forward, floorIndex)
-      : null;
+    const aimed = s.aim === 'nearest' || s.aim === 'target';
+    // `knownTarget === undefined` means "look it up yourself"; null means the
+    // caller already looked and found nothing.
+    const target = !aimed ? null
+      : (knownTarget !== undefined ? knownTarget : this.targetFor(origin, forward, floorIndex));
 
     let base = forward;
     if (target) {
