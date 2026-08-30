@@ -30,6 +30,11 @@ export class AudioEngine {
     this.bossMode = false;
     this.nextStepTime = 0;
     this.step = 0;
+    // With hundreds of shots a second, unlimited voices clip into mush and
+    // stall the audio thread. Each effect gets a minimum spacing and the whole
+    // mix gets a per-frame budget.
+    this.lastPlayed = new Map();
+    this.voiceBudget = 0;
   }
 
   /** Must be called from a user gesture; browsers refuse audio before one. */
@@ -132,6 +137,9 @@ export class AudioEngine {
 
   /** Schedule any steps that fall inside the lookahead window. */
   update(dt) {
+    // Refilled every frame; spent by play(). Keeps a wall of impacts audible
+    // without letting it swamp the music.
+    this.voiceBudget = 7;
     if (!this.ctx || !this.started) return;
     this.intensity += (this.targetIntensity - this.intensity) * Math.min(1, dt * 1.6);
     const now = this.ctx.currentTime;
@@ -302,57 +310,116 @@ export class AudioEngine {
     src.stop(t + decay + 0.05);
   }
 
-  play(name) {
+  /**
+   * Fire one effect. `pitch` multiplies every frequency, which is what stops a
+   * rapid-fire weapon from sounding like one long buzz - each shot lands
+   * slightly differently, the way a real burst does.
+   */
+  play(name, options = {}) {
     if (!this.ctx || !this.enabled) return;
+    const { pitch = 1, gain = 1, spacing = 0.03, force = false } = options;
+    const now = this.ctx.currentTime;
+    if (!force) {
+      if (this.voiceBudget <= 0) return;
+      const last = this.lastPlayed.get(name) || 0;
+      if (now - last < spacing) return;
+      this.voiceBudget -= 1;
+    }
+    this.lastPlayed.set(name, now);
+    const p = pitch;
+    const g = gain;
+
     switch (name) {
       case 'shoot':
-        this.blip({ type: 'square', from: 1250, to: 260, gain: 0.16, decay: 0.09, filter: { type: 'lowpass', frequency: 2600 } });
-        this.burst({ gain: 0.08, decay: 0.06, from: 6000, to: 1200 });
+        this.blip({ type: 'square', from: 1250 * p, to: 260 * p, gain: 0.10 * g, decay: 0.08, filter: { type: 'lowpass', frequency: 2600 } });
+        this.burst({ gain: 0.05 * g, decay: 0.05, from: 6000 * p, to: 1200 });
+        break;
+      case 'surge':
+        this.blip({ type: 'sawtooth', from: 260 * p, to: 900 * p, gain: 0.22 * g, decay: 0.26 });
+        this.burst({ gain: 0.16 * g, decay: 0.24, from: 1800, to: 400 });
         break;
       case 'blast':
-        this.blip({ type: 'sawtooth', from: 420, to: 60, gain: 0.3, decay: 0.34 });
-        this.burst({ gain: 0.24, decay: 0.3, from: 2600, to: 160 });
+        this.blip({ type: 'sawtooth', from: 420 * p, to: 60, gain: 0.28 * g, decay: 0.34 });
+        this.burst({ gain: 0.24 * g, decay: 0.32, from: 2600, to: 140 });
         break;
-      case 'charge':
-        this.blip({ type: 'triangle', from: 180, to: 900, gain: 0.12, decay: 0.5 });
+      case 'explode':
+        this.blip({ type: 'sawtooth', from: 200 * p, to: 40, gain: 0.24 * g, decay: 0.42 });
+        this.burst({ gain: 0.26 * g, decay: 0.4, from: 2200, to: 90 });
         break;
       case 'hitWall':
-        this.burst({ gain: 0.10, decay: 0.08, from: 2600, to: 500 });
+        this.burst({ gain: 0.06 * g, decay: 0.06, from: 2600 * p, to: 500 });
+        break;
+      case 'hitEmber':
+        this.blip({ type: 'square', from: 900 * p, to: 300 * p, gain: 0.10 * g, decay: 0.10 });
+        this.burst({ gain: 0.10 * g, decay: 0.14, from: 2400, to: 300 });
+        break;
+      case 'hitFrost':
+        this.blip({ type: 'triangle', from: 2400 * p, to: 1400 * p, gain: 0.09 * g, decay: 0.12 });
+        break;
+      case 'hitArc':
+        this.blip({ type: 'square', from: 2600 * p, to: 900 * p, gain: 0.08 * g, decay: 0.07 });
+        this.burst({ gain: 0.07 * g, decay: 0.08, from: 7000, to: 2000, type: 'highpass' });
+        break;
+      case 'hitVoid':
+        this.blip({ type: 'sine', from: 420 * p, to: 90 * p, gain: 0.12 * g, decay: 0.22 });
+        break;
+      case 'hitBone':
+        this.blip({ type: 'square', from: 1700 * p, to: 700 * p, gain: 0.11 * g, decay: 0.06 });
+        break;
+      case 'hitRot':
+        this.burst({ gain: 0.09 * g, decay: 0.16, from: 900 * p, to: 200, type: 'bandpass' });
         break;
       case 'hitEnemy':
-        this.blip({ type: 'square', from: 1700, to: 700, gain: 0.14, decay: 0.07 });
+        this.blip({ type: 'square', from: 1500 * p, to: 650 * p, gain: 0.09 * g, decay: 0.06 });
+        break;
+      case 'crit':
+        this.blip({ type: 'square', from: 2200 * p, to: 1100 * p, gain: 0.14 * g, decay: 0.10 });
         break;
       case 'notice':
-        this.blip({ type: 'sawtooth', from: 160, to: 95, gain: 0.16, decay: 0.4, filter: { type: 'lowpass', frequency: 900 } });
+        this.blip({ type: 'sawtooth', from: 160 * p, to: 95, gain: 0.12 * g, decay: 0.4, filter: { type: 'lowpass', frequency: 900 } });
         break;
       case 'windup':
-        // A rising warning: the sound of something about to hit you.
-        this.blip({ type: 'triangle', from: 300, to: 780, gain: 0.13, decay: 0.30 });
+        this.blip({ type: 'triangle', from: 300 * p, to: 780 * p, gain: 0.10 * g, decay: 0.28 });
         break;
       case 'enemyHurt':
-        this.blip({ type: 'sawtooth', from: 300, to: 120, gain: 0.16, decay: 0.15 });
+        this.blip({ type: 'sawtooth', from: 300 * p, to: 120, gain: 0.10 * g, decay: 0.12 });
         break;
       case 'enemyDie':
-        this.blip({ type: 'sawtooth', from: 260, to: 45, gain: 0.22, decay: 0.4 });
-        this.burst({ gain: 0.2, decay: 0.35, from: 3200, to: 120 });
+        this.blip({ type: 'sawtooth', from: 260 * p, to: 45, gain: 0.14 * g, decay: 0.28 });
+        this.burst({ gain: 0.12 * g, decay: 0.26, from: 3200, to: 120 });
         break;
       case 'playerHurt':
-        this.blip({ type: 'sawtooth', from: 200, to: 70, gain: 0.3, decay: 0.28 });
-        this.burst({ gain: 0.18, decay: 0.2, from: 900, to: 90 });
+        this.blip({ type: 'sawtooth', from: 200, to: 70, gain: 0.3 * g, decay: 0.28 });
+        this.burst({ gain: 0.18 * g, decay: 0.2, from: 900, to: 90 });
+        break;
+      case 'essence':
+        this.blip({ type: 'triangle', from: 1200 * p, to: 1900 * p, gain: 0.05 * g, decay: 0.07 });
         break;
       case 'pickup':
-        this.blip({ type: 'triangle', from: 620, to: 1240, gain: 0.16, decay: 0.14 });
+        this.blip({ type: 'triangle', from: 620 * p, to: 1240 * p, gain: 0.16 * g, decay: 0.14 });
+        break;
+      case 'levelUp':
+        [0, 4, 7, 12].forEach((semi, i) => {
+          setTimeout(() => this.blip({
+            type: 'triangle', from: 523.25 * Math.pow(2, semi / 12), to: 523.25 * Math.pow(2, semi / 12),
+            gain: 0.16, decay: 0.34,
+          }), i * 70);
+        });
+        break;
+      case 'choose':
+        this.blip({ type: 'square', from: 900, to: 1600, gain: 0.16, decay: 0.16 });
         break;
       case 'key':
-        this.blip({ type: 'sine', from: 880, to: 1760, gain: 0.2, decay: 0.3 });
-        this.blip({ type: 'sine', from: 1320, to: 2640, gain: 0.1, decay: 0.34 });
+        this.blip({ type: 'sine', from: 880, to: 1760, gain: 0.2 * g, decay: 0.3 });
+        this.blip({ type: 'sine', from: 1320, to: 2640, gain: 0.1 * g, decay: 0.34 });
         break;
       case 'door':
-        this.burst({ gain: 0.26, decay: 0.6, from: 700, to: 90, type: 'bandpass' });
-        this.blip({ type: 'sawtooth', from: 90, to: 45, gain: 0.18, decay: 0.6 });
+      case 'riftOpen':
+        this.burst({ gain: 0.24 * g, decay: 0.7, from: 700, to: 90, type: 'bandpass' });
+        this.blip({ type: 'sawtooth', from: 90, to: 45, gain: 0.18 * g, decay: 0.7 });
         break;
       case 'descend':
-        this.blip({ type: 'sine', from: 520, to: 130, gain: 0.22, decay: 0.6 });
+        this.blip({ type: 'sine', from: 520, to: 130, gain: 0.22 * g, decay: 0.6 });
         break;
       case 'bossRoar':
         this.blip({ type: 'sawtooth', from: 150, to: 42, gain: 0.34, decay: 1.4 });

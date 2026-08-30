@@ -1,57 +1,64 @@
 /**
  * Enemies, projectiles, pickups and particles.
  *
- * Enemy navigation uses a flow field: a breadth-first sweep out from the
- * player's tile over the floor they are on, recomputed a few times a second.
- * Every enemy then just walks downhill. One sweep serves the whole floor, so a
- * roomful of monsters costs about the same as one.
+ * This is a bullet heaven, so everything here is built for crowds. Navigation is
+ * a flow field - one breadth-first sweep out from the player's tile serves the
+ * whole floor, so a hundred monsters cost about what one does. Separation runs
+ * off a spatial hash rebuilt each frame rather than comparing every pair, which
+ * is the difference between a horde and a slideshow.
  */
 
 import { TILE_SIZE, DIRS } from './grid.js';
 import { ROOM_TYPE } from './generator.js';
+import { rgb } from './palette.js';
 
 export const ENEMY_TYPES = {
   crawler: {
     name: 'Crawler',
-    hp: 26, speed: 3.8, radius: 0.34, height: 1.05,
-    damage: 8, range: 1.5, windup: 0.34, recover: 0.55,
-    ranged: false, score: 100,
-    body: [0.30, 0.30, 0.42], colour: [0.42, 0.78, 0.40], eye: [0.85, 1.0, 0.45],
-  },
-  sentinel: {
-    name: 'Sentinel',
-    hp: 78, speed: 1.45, radius: 0.48, height: 1.85,
-    damage: 11, range: 16, windup: 0.75, recover: 1.5,
-    ranged: true, projectileSpeed: 12, score: 250,
-    body: [0.40, 0.62, 0.40], colour: [0.86, 0.62, 0.24], eye: [1.0, 0.85, 0.35],
+    hp: 17, speed: 4.35, radius: 0.34, height: 1.05,
+    damage: 5, range: 1.5, windup: 0.32, recover: 0.5,
+    ranged: false, score: 60, xp: 3,
+    colour: 'bone', eye: rgb('ember', 4),
   },
   wraith: {
     name: 'Wraith',
-    hp: 44, speed: 2.5, radius: 0.36, height: 1.6,
-    damage: 15, range: 1.8, windup: 0.48, recover: 0.9,
-    ranged: false, lunge: 9.5, score: 180,
-    body: [0.32, 0.55, 0.32], colour: [0.62, 0.42, 0.88], eye: [0.85, 0.6, 1.0],
+    hp: 34, speed: 3.5, radius: 0.36, height: 1.6,
+    damage: 9, range: 1.8, windup: 0.44, recover: 0.8,
+    ranged: false, lunge: 9.5, score: 130, xp: 6,
+    colour: 'arcane', eye: rgb('arcane', 4),
+  },
+  sentinel: {
+    name: 'Sentinel',
+    hp: 62, speed: 1.6, radius: 0.48, height: 1.85,
+    damage: 8, range: 15, windup: 0.7, recover: 1.45,
+    ranged: true, projectileSpeed: 12, score: 190, xp: 9,
+    colour: 'verdigris', eye: rgb('ember', 4),
   },
   warden: {
     name: 'The Warden',
-    hp: 620, speed: 1.7, radius: 0.95, height: 3.0,
-    damage: 17, range: 20, windup: 0.95, recover: 1.5,
-    ranged: true, projectileSpeed: 11, score: 5000, boss: true,
-    body: [0.85, 1.05, 0.85], colour: [0.80, 0.22, 0.24], eye: [1.0, 0.75, 0.35],
+    hp: 1500, speed: 1.9, radius: 0.95, height: 3.0,
+    damage: 16, range: 20, windup: 0.9, recover: 1.35,
+    ranged: true, projectileSpeed: 12, score: 6000, xp: 160, boss: true,
+    colour: 'blood', eye: rgb('ember', 4),
   },
 };
 
-/** How many monsters a floor gets, and of what kind. */
-function budgetFor(depth) {
-  return {
-    count: 7 + depth * 4,
-    weights: [
-      ['crawler', Math.max(1, 6 - depth)],
-      ['sentinel', 1 + depth],
-      ['wraith', depth],
-    ],
-  };
-}
+/** Hard ceiling on live monsters. Past this the frame, not the fight, is the enemy. */
+const MAX_ENEMIES = 150;
+/**
+ * How many monsters may linger on floors the player is not on.
+ *
+ * Anything above this is bookkeeping, not gameplay: it is unseen, it cannot be
+ * fought, and every slot it holds is a slot the floor under your feet does not
+ * get. Left unchecked the swarm fills its whole budget with monsters three
+ * floors up and the fight in front of you starves. The spawner refills any
+ * floor you walk back onto within seconds, so nothing observable is lost.
+ */
+const OFF_FLOOR_BUDGET = 24;
+/** The body the pathing mask is cut for: the widest monster that walks (sentinel). */
+const BODY_RADIUS = 0.5;
+const BODY_HEIGHT = 1.85;
+const SEPARATION_CELL = 1.6;
 
 let nextId = 1;
 
@@ -64,41 +71,89 @@ export class Swarm {
     this.projectiles = [];
     this.particles = [];
     this.pickups = [];
+    this.motes = [];
+    this.arcs = [];
     this.flow = new Map();
     this.flowAge = 0;
     this.flowFloor = -1;
     this.aggroCount = 0;
     this.boss = null;
     this.clock = 0;
+    this.spawnAccumulator = 0;
+    this.grid = new Map();
+    this.killsByFloor = new Map();
+  }
+
+  setFrames(frames) { this.frames = frames; }
+
+  /**
+   * Every walkable tile per floor, cached once.
+   *
+   * The spawner used to guess coordinates and throw most of them away, which
+   * quietly capped the horde at a trickle. Sampling from a real list means a
+   * requested spawn almost always happens.
+   */
+  /**
+   * Tiles a monster body can actually stand on.
+   *
+   * `plan.walkable` answers a question about the tile map; `canOccupy` answers
+   * the question the movement code actually asks, with a radius and a height. A
+   * doorway with a brazier in it is walkable and unstandable, and routing a
+   * horde through one parks it against the obstruction forever. Everything that
+   * decides where monsters go - the flow field, the spawner - reads this mask,
+   * so pathing and movement agree by construction.
+   */
+  passableMask(floorIndex) {
+    if (!this.masks) this.masks = new Map();
+    // Hashed once per frame in update(), not once per enemy: this is called from
+    // flowStep for every chasing monster.
+    const doorState = this.doorState || 0;
+    const cached = this.masks.get(floorIndex);
+    if (cached && cached.doorState === doorState) return cached.mask;
+    const plan = this.dungeon.floors[floorIndex];
+    const mask = new Uint8Array(plan.width * plan.height);
+    for (let z = 0; z < plan.height; z += 1) {
+      for (let x = 0; x < plan.width; x += 1) {
+        if (!plan.walkable(x, z)) continue;
+        const world = plan.worldOf(x, z);
+        const y = this.physics.canOccupy(world[0], world[2], world[1], world[1], BODY_RADIUS, BODY_HEIGHT);
+        if (y !== null) mask[z * plan.width + x] = 1;
+      }
+    }
+    this.masks.set(floorIndex, { mask, doorState });
+    return mask;
+  }
+
+  buildSpawnTiles() {
+    this.spawnTiles = this.dungeon.floors.map((plan) => {
+      const mask = this.passableMask(plan.index);
+      const tiles = [];
+      for (let z = 0; z < plan.height; z += 1) {
+        for (let x = 0; x < plan.width; x += 1) {
+          if (mask[z * plan.width + x] && !plan.isReserved(x, z)) tiles.push(x, z);
+        }
+      }
+      return tiles;
+    });
   }
 
   /* ------------------------------ spawning ----------------------------- */
 
+  /** Seed each floor lightly; the waves do the real work once you arrive. */
   populate() {
-    const startRoom = this.dungeon.roomsById.get(this.dungeon.start);
     for (const plan of this.dungeon.floors) {
-      const budget = budgetFor(plan.index);
-      const rooms = plan.rooms.filter((r) => r.id !== startRoom.id && r.id !== this.dungeon.goal);
-      if (!rooms.length) continue;
-      let placed = 0;
-      let guard = 0;
-      while (placed < budget.count && guard < budget.count * 12) {
-        guard += 1;
+      const rooms = plan.rooms.filter((r) => r.id !== this.dungeon.start);
+      for (let i = 0; i < 4 + plan.index * 2 && rooms.length; i += 1) {
         const room = this.rng.pick(rooms);
-        const kind = this.pickKind(budget.weights);
         const spot = this.freeTileIn(plan, room);
-        if (!spot) continue;
-        if (this.spawn(kind, plan, spot[0], spot[1])) placed += 1;
+        if (spot) this.spawn(this.pickKind(plan.index), plan, spot[0], spot[1]);
       }
-      // Every floor keeps a couple of health caches so exploring pays.
       for (const room of rooms) {
         if (room.type !== ROOM_TYPE.VAULT && room.type !== ROOM_TYPE.SHRINE) continue;
         const spot = this.freeTileIn(plan, room);
-        if (spot) this.addPickup(room.type === ROOM_TYPE.VAULT ? 'health' : 'energy', plan, spot[0], spot[1], 40);
+        if (spot) this.addPickup(room.type === ROOM_TYPE.VAULT ? 'health' : 'energy', plan, spot[0], spot[1], 35);
       }
     }
-    // The boss waits in the deepest chamber, with supplies around the edges so
-    // the fight is a battle of attrition rather than one unlucky volley.
     const goal = this.dungeon.roomsById.get(this.dungeon.goal);
     if (goal) {
       const plan = this.dungeon.floors[goal.floor];
@@ -112,14 +167,12 @@ export class Swarm {
     return this;
   }
 
-  pickKind(weights) {
-    const total = weights.reduce((sum, [, w]) => sum + w, 0);
-    let roll = this.rng.next() * total;
-    for (const [kind, w] of weights) {
-      roll -= w;
-      if (roll <= 0) return kind;
-    }
-    return weights[0][0];
+  pickKind(depth) {
+    const roll = this.rng.next();
+    if (depth <= 0) return roll < 0.82 ? 'crawler' : 'sentinel';
+    if (depth === 1) return roll < 0.66 ? 'crawler' : roll < 0.86 ? 'wraith' : 'sentinel';
+    if (depth === 2) return roll < 0.52 ? 'crawler' : roll < 0.80 ? 'wraith' : 'sentinel';
+    return roll < 0.44 ? 'crawler' : roll < 0.74 ? 'wraith' : 'sentinel';
   }
 
   freeTileIn(plan, room) {
@@ -132,19 +185,21 @@ export class Swarm {
     return null;
   }
 
-  spawn(kind, plan, tileX, tileZ) {
+  spawn(kind, plan, tileX, tileZ, elite = false) {
+    if (this.enemies.length >= MAX_ENEMIES) return null;
     const type = ENEMY_TYPES[kind];
     const world = plan.worldOf(tileX, tileZ);
     const y = this.physics.canOccupy(world[0], world[2], world[1], world[1], type.radius, type.height);
     if (y === null) return null;
+    const scale = elite ? 1.5 : 1;
     const enemy = {
       id: nextId++,
-      kind,
-      type,
+      kind, type, elite,
       x: world[0], y, z: world[2],
       floor: plan.index,
-      hp: type.hp,
-      maxHp: type.hp,
+      hp: type.hp * (elite ? 3.2 : 1),
+      maxHp: type.hp * (elite ? 3.2 : 1),
+      scale,
       state: 'idle',
       stateTime: 0,
       facing: this.rng.next() * Math.PI * 2,
@@ -152,37 +207,120 @@ export class Swarm {
       bob: this.rng.next() * 6.28,
       aggro: false,
       dormant: false,
-      phase: 0,
+      earshot: 0,
+      slowUntil: 0,
+      burnUntil: 0,
+      burnDps: 0,
     };
     this.enemies.push(enemy);
     return enemy;
+  }
+
+  /**
+   * Continuous pressure. Monsters arrive out of sight and walk in, so the horde
+   * builds rather than popping into existence in front of you.
+   */
+  spawnWave(dt, player, depth, intensity) {
+    if (this.enemies.length >= MAX_ENEMIES) return;
+    const plan = this.dungeon.floors[depth];
+    if (!plan) return;
+    if (!this.spawnTiles) this.buildSpawnTiles();
+    const tiles = this.spawnTiles[depth];
+    if (!tiles || !tiles.length) return;
+
+    // A live ceiling as well as the hard one. The floor you just arrived on is
+    // thin enough to read; the one you have been farming for two minutes is a
+    // wall of bodies. The ramp is what turns "stay or leave" into a real choice.
+    const ceiling = Math.min(MAX_ENEMIES, Math.round(34 + depth * 20 + intensity * 46));
+    const live = this.aliveOnFloor(depth);
+    if (live >= ceiling) { this.spawnAccumulator = 0; return; }
+
+    const field = this.flowFloor === depth ? this.flow.get(depth) : null;
+    const rate = 1.9 + depth * 0.8 + intensity * 6.4;
+    this.spawnAccumulator += dt * rate;
+    let budget = Math.floor(this.spawnAccumulator);
+    if (budget <= 0) return;
+    this.spawnAccumulator -= budget;
+    budget = Math.min(budget, MAX_ENEMIES - this.enemies.length, ceiling - live);
+
+    // Three progressively looser windows. The first is the one we want - out of
+    // sight, close enough to arrive soon - but a player holding a corner of a
+    // sparse floor can starve it of candidates, and a horde that stops arriving
+    // is the one failure this loop cannot survive. So the rules relax rather
+    // than the budget being dropped.
+    const windows = [
+      { min: 7, max: 30, hideRoll: 0.8 },
+      { min: 6, max: 42, hideRoll: 0.35 },
+      { min: 5, max: 70, hideRoll: 0 },
+    ];
+    for (const window of windows) {
+      let guard = 0;
+      while (budget > 0 && guard < 200) {
+        guard += 1;
+        const i = this.rng.int(tiles.length >> 1) << 1;
+        const tx = tiles[i];
+        const tz = tiles[i + 1];
+        const world = plan.worldOf(tx, tz);
+        const dist = Math.hypot(world[0] - player.x, world[2] - player.z);
+        if (dist < window.min || dist > window.max) continue;
+        // A monster that cannot walk to you is worse than no monster: it holds
+        // a slot, it never arrives, and the floor quietly goes quiet. The flow
+        // field is already a reachability map from the player, so ask it.
+        if (field && field[tz * plan.width + tx] < 0) continue;
+        if (window.hideRoll > 0 && dist < 18) {
+          const seen = this.physics.rayClear(
+            [player.x, player.y + 1.4, player.z], [world[0], world[1] + 1, world[2]],
+          );
+          if (seen && this.rng.next() < window.hideRoll) continue;
+        }
+        const elite = this.rng.next() < 0.035 + depth * 0.02;
+        const spawned = this.spawn(this.pickKind(depth), plan, tx, tz, elite);
+        if (spawned) {
+          spawned.aggro = true;
+          spawned.state = 'chase';
+          budget -= 1;
+        }
+      }
+      if (budget <= 0) break;
+    }
   }
 
   addPickup(kind, plan, tileX, tileZ, amount) {
     const world = plan.worldOf(tileX, tileZ);
     const y = this.physics.canOccupy(world[0], world[2], world[1], world[1], 0.2, 0.5);
     if (y === null) return;
-    this.pickups.push({
-      kind, amount, floor: plan.index, x: world[0], y, z: world[2], bob: Math.random() * 6.28,
-    });
+    this.pickups.push({ kind, amount, floor: plan.index, x: world[0], y, z: world[2], bob: Math.random() * 6.28 });
   }
 
   dropLoot(enemy) {
-    // Kills feed the loop: most drop something small, so pushing forward is
-    // usually better than retreating.
-    const roll = this.rng.next();
-    const plan = this.dungeon.floors[enemy.floor];
-    if (roll < 0.34) {
-      this.pickups.push({ kind: 'health', amount: 12, floor: enemy.floor, x: enemy.x, y: enemy.y, z: enemy.z, bob: 0 });
-    } else if (roll < 0.72) {
-      this.pickups.push({ kind: 'energy', amount: 24, floor: enemy.floor, x: enemy.x, y: enemy.y, z: enemy.z, bob: 0 });
+    // Essence always drops - the loop depends on every kill feeding the bar.
+    const value = enemy.type.xp * (enemy.elite ? 5 : 1);
+    const motes = enemy.elite ? 5 : enemy.type.xp > 5 ? 2 : 1;
+    for (let i = 0; i < motes; i += 1) {
+      const a = this.rng.next() * Math.PI * 2;
+      this.motes.push({
+        x: enemy.x + Math.cos(a) * 0.35,
+        y: enemy.y + 0.4,
+        z: enemy.z + Math.sin(a) * 0.35,
+        vx: Math.cos(a) * 2.4, vy: 3.2, vz: Math.sin(a) * 2.4,
+        value: Math.max(1, Math.round(value / motes)),
+        floor: enemy.floor, age: 0,
+      });
     }
-    void plan;
+    // Desperation drops. At full hull the horde is stingy; at a sliver it starts
+    // handing out lifelines, so a run that is nearly over can still be clawed
+    // back - and clawing it back is the moment players replay for.
+    const mercy = (this.desperation || 0) * 0.16;
+    const roll = this.rng.next();
+    if (roll < (enemy.elite ? 0.7 : 0.055 + mercy)) {
+      this.pickups.push({ kind: 'health', amount: 14, floor: enemy.floor, x: enemy.x, y: enemy.y, z: enemy.z, bob: 0 });
+    } else if (roll < (enemy.elite ? 0.95 : 0.11 + mercy)) {
+      this.pickups.push({ kind: 'energy', amount: 26, floor: enemy.floor, x: enemy.x, y: enemy.y, z: enemy.z, bob: 0 });
+    }
   }
 
   /* ---------------------------- flow field ----------------------------- */
 
-  /** Breadth-first distances to the player over one floor's walkable tiles. */
   rebuildFlow(floorIndex, tileX, tileZ) {
     const plan = this.dungeon.floors[floorIndex];
     if (!plan) return;
@@ -193,9 +331,10 @@ export class Swarm {
       this.flow.set(floorIndex, field);
     }
     field.fill(-1);
-    if (!plan.walkable(tileX, tileZ)) {
-      // The player may be standing on a stair tower; seed from a walkable neighbour.
-      const near = DIRS.map((d) => [tileX + d.dx, tileZ + d.dz]).find(([x, z]) => plan.walkable(x, z));
+    const mask = this.passableMask(floorIndex);
+    const open = (x, z) => plan.inside(x, z) && mask[z * plan.width + x] === 1;
+    if (!open(tileX, tileZ)) {
+      const near = DIRS.map((d) => [tileX + d.dx, tileZ + d.dz]).find(([x, z]) => open(x, z));
       if (!near) return;
       [tileX, tileZ] = near;
     }
@@ -209,7 +348,7 @@ export class Swarm {
       for (const d of DIRS) {
         const nx = x + d.dx;
         const nz = z + d.dz;
-        if (!plan.walkable(nx, nz)) continue;
+        if (!open(nx, nz)) continue;
         const ni = nz * plan.width + nx;
         if (field[ni] !== -1) continue;
         field[ni] = next;
@@ -226,10 +365,11 @@ export class Swarm {
     const tx = Math.floor(enemy.x / TILE_SIZE);
     const tz = Math.floor(enemy.z / TILE_SIZE);
     let best = null;
+    const mask = this.passableMask(enemy.floor);
     for (const d of DIRS) {
       const nx = tx + d.dx;
       const nz = tz + d.dz;
-      if (!plan.inside(nx, nz) || !plan.walkable(nx, nz)) continue;
+      if (!plan.inside(nx, nz) || mask[nz * plan.width + nx] !== 1) continue;
       const value = field[nz * plan.width + nx];
       if (value < 0) continue;
       if (!best || value < best.value) best = { value, x: nx, z: nz };
@@ -239,9 +379,34 @@ export class Swarm {
     return [target[0] - enemy.x, target[2] - enemy.z];
   }
 
+  /* --------------------------- spatial hash ---------------------------- */
+
+  rebuildGrid() {
+    this.grid.clear();
+    for (const enemy of this.enemies) {
+      if (enemy.hp <= 0) continue;
+      const key = `${Math.floor(enemy.x / SEPARATION_CELL)}:${Math.floor(enemy.z / SEPARATION_CELL)}`;
+      let bucket = this.grid.get(key);
+      if (!bucket) { bucket = []; this.grid.set(key, bucket); }
+      bucket.push(enemy);
+    }
+  }
+
+  nearby(x, z, out) {
+    out.length = 0;
+    const cx = Math.floor(x / SEPARATION_CELL);
+    const cz = Math.floor(z / SEPARATION_CELL);
+    for (let dz = -1; dz <= 1; dz += 1) {
+      for (let dx = -1; dx <= 1; dx += 1) {
+        const bucket = this.grid.get(`${cx + dx}:${cz + dz}`);
+        if (bucket) for (const e of bucket) out.push(e);
+      }
+    }
+    return out;
+  }
+
   /* ------------------------------ combat ------------------------------- */
 
-  /** First enemy a shot meets, or null. Walls are checked by the caller. */
   raycast(origin, dir, maxDistance) {
     let hit = null;
     for (const enemy of this.enemies) {
@@ -252,45 +417,80 @@ export class Swarm {
       const along = ex * dir[0] + ey * dir[1] + ez * dir[2];
       if (along < 0 || along > maxDistance) continue;
       const perp = Math.hypot(ex - dir[0] * along, ey - dir[1] * along, ez - dir[2] * along);
-      const girth = Math.max(enemy.type.radius, enemy.type.height * 0.3);
+      const girth = Math.max(enemy.type.radius, enemy.type.height * 0.3) * enemy.scale;
       if (perp > girth) continue;
       if (!hit || along < hit.distance) hit = { enemy, distance: along };
     }
     return hit;
   }
 
-  /** Wake everything near a disturbance, so encounters grow instead of queueing. */
-  alert(source, radius = 9) {
-    for (const other of this.enemies) {
+  /**
+   * Who a weapon shoots at.
+   *
+   * Bullet heavens do not ask you to aim - they ask you where to stand. So
+   * weapons lock on by themselves, but they prefer whatever is in the arc you
+   * are facing, which keeps looking around meaningful without ever wasting a
+   * volley on empty air.
+   */
+  targetFor(origin, forward, floorIndex, maxDistance = 42) {
+    let front = null;
+    let any = null;
+    for (const enemy of this.enemies) {
+      if (enemy.hp <= 0 || enemy.floor !== floorIndex || enemy.dormant) continue;
+      const dx = enemy.x - origin[0];
+      const dz = enemy.z - origin[2];
+      const d = Math.hypot(dx, dz);
+      if (d > maxDistance || d < 0.001) continue;
+      if (!any || d < any.d) any = { d, enemy };
+      const facing = (dx / d) * forward[0] + (dz / d) * forward[2];
+      if (facing > 0.26 && (!front || d < front.d)) front = { d, enemy };
+    }
+    return (front || any) ? (front || any).enemy : null;
+  }
+
+  /** Closest live enemy on the player's floor, for homing rounds. */
+  nearestTo(x, z, floorIndex, maxDistance = 40) {
+    let best = null;
+    for (const enemy of this.enemies) {
+      if (enemy.hp <= 0 || enemy.floor !== floorIndex || enemy.dormant) continue;
+      const d = Math.hypot(enemy.x - x, enemy.z - z);
+      if (d > maxDistance) continue;
+      if (!best || d < best.d) best = { d, enemy };
+    }
+    return best ? best.enemy : null;
+  }
+
+  alert(source, radius = 10) {
+    for (const other of this.nearby(source.x, source.z, [])) {
       if (other === source || other.hp <= 0 || other.aggro || other.dormant) continue;
       if (other.floor !== source.floor) continue;
-      if (Math.hypot(other.x - source.x, other.z - source.z) > radius) continue;
       other.aggro = true;
       other.state = 'chase';
       other.stateTime = 0;
     }
+    void radius;
   }
 
-  hurt(enemy, amount, knockDir, onKill) {
+  hurt(enemy, amount, knockDir, hooks = {}) {
     if (enemy.hp <= 0) return false;
     const wasCalm = !enemy.aggro;
     enemy.hp -= amount;
-    enemy.hurtFlash = 0.18;
+    enemy.hurtFlash = 0.16;
     enemy.aggro = true;
     enemy.dormant = false;
     if (wasCalm) this.alert(enemy);
     if (knockDir) {
-      const push = enemy.type.boss ? 0.06 : 0.32;
+      const push = enemy.type.boss ? 0.04 : 0.26 / enemy.scale;
       this.physics.move(enemy, knockDir[0] * push, knockDir[1] * push, enemy.type.radius, enemy.type.height);
     }
     if (enemy.hp <= 0) {
       enemy.state = 'dead';
-      this.burst(enemy.x, enemy.y + enemy.type.height * 0.5, enemy.z, enemy.type.colour, enemy.type.boss ? 46 : 16);
+      this.burst(enemy.x, enemy.y + enemy.type.height * 0.5, enemy.z,
+        rgb(enemy.type.colour, 3), enemy.type.boss ? 60 : enemy.elite ? 26 : 11);
       this.dropLoot(enemy);
-      if (onKill) onKill(enemy);
+      if (hooks.onKill) hooks.onKill(enemy);
       return true;
     }
-    // Getting hit interrupts a wind-up, which rewards aggressive play.
     if (enemy.state === 'windup' && !enemy.type.boss) {
       enemy.state = 'stagger';
       enemy.stateTime = 0;
@@ -299,74 +499,227 @@ export class Swarm {
   }
 
   burst(x, y, z, colour, count) {
-    for (let i = 0; i < count; i += 1) {
+    const room = 640 - this.particles.length;
+    const n = Math.min(count, Math.max(0, room));
+    for (let i = 0; i < n; i += 1) {
       const a = Math.random() * Math.PI * 2;
       const p = Math.random() * Math.PI - Math.PI / 2;
-      const speed = 1.6 + Math.random() * 4.5;
+      const speed = 1.8 + Math.random() * 5.5;
       this.particles.push({
         x, y, z,
         vx: Math.cos(a) * Math.cos(p) * speed,
-        vy: Math.sin(p) * speed + 1.6,
+        vy: Math.sin(p) * speed + 1.9,
         vz: Math.sin(a) * Math.cos(p) * speed,
-        life: 0.35 + Math.random() * 0.5,
-        maxLife: 0.85,
+        life: 0.3 + Math.random() * 0.45,
+        maxLife: 0.75,
         colour,
         size: 0.05 + Math.random() * 0.07,
       });
     }
   }
 
-  spawnProjectile(from, dir, speed, damage, colour, owner) {
+  /**
+   * Fire one weapon. The core decides the aim pattern, so adding a new firing
+   * shape means adding a case here and nothing else.
+   */
+  fireWeapon(weapon, origin, forward, floorIndex, bonus, hooks) {
+    const s = weapon.stats;
+    const damage = s.damage * (1 + (bonus.damage || 0));
+    const size = s.size * (1 + (bonus.area || 0));
+    const target = (s.aim === 'nearest' || s.aim === 'target')
+      ? this.targetFor(origin, forward, floorIndex)
+      : null;
+
+    let base = forward;
+    if (target) {
+      const dx = target.x - origin[0];
+      const dy = (target.y + target.type.height * 0.5) - origin[1];
+      const dz = target.z - origin[2];
+      const len = Math.hypot(dx, dy, dz) || 1;
+      base = [dx / len, dy / len, dz / len];
+    }
+
+    const shots = [];
+    if (s.aim === 'radial') {
+      for (let i = 0; i < s.count; i += 1) {
+        const a = (i / s.count) * Math.PI * 2 + this.clock * 0.6;
+        shots.push([Math.cos(a), 0, Math.sin(a)]);
+      }
+    } else {
+      for (let i = 0; i < s.count; i += 1) {
+        const offset = s.count === 1 ? 0 : ((i / (s.count - 1)) - 0.5) * s.spread;
+        const cos = Math.cos(offset);
+        const sin = Math.sin(offset);
+        shots.push([
+          base[0] * cos - base[2] * sin,
+          base[1],
+          base[0] * sin + base[2] * cos,
+        ]);
+      }
+    }
+
+    for (const dir of shots) {
+      this.projectiles.push({
+        x: origin[0], y: origin[1], z: origin[2],
+        vx: dir[0] * s.speed, vy: dir[1] * s.speed, vz: dir[2] * s.speed,
+        damage, size, weapon: s,
+        pierce: s.pierce, chain: s.chain, life: s.life,
+        crit: s.crit + (bonus.crit || 0),
+        colour: s.colour, owner: 'player', hits: null,
+        floor: floorIndex,
+      });
+    }
+    if (hooks.onFire) hooks.onFire(weapon, origin);
+  }
+
+  spawnEnemyProjectile(from, dir, speed, damage, colour) {
     this.projectiles.push({
       x: from[0], y: from[1], z: from[2],
       vx: dir[0] * speed, vy: dir[1] * speed, vz: dir[2] * speed,
-      damage, colour, owner, life: 4.5,
+      damage, size: 0.34, colour, owner: 'enemy', life: 4.5, pierce: 0, chain: 0,
     });
+  }
+
+  /** Apply a weapon's element effects where it landed. */
+  applyImpact(projectile, enemy, hooks) {
+    const s = projectile.weapon;
+    if (!s) return;
+    if (s.slow > 0 && enemy) enemy.slowUntil = this.clock + 1.6;
+    if (s.burn > 0 && enemy) {
+      enemy.burnUntil = this.clock + 2.6;
+      enemy.burnDps = Math.max(enemy.burnDps, s.burn);
+    }
+    if (s.pull > 0 && enemy) {
+      const dx = projectile.x - enemy.x;
+      const dz = projectile.z - enemy.z;
+      const len = Math.hypot(dx, dz) || 1;
+      this.physics.move(enemy, (dx / len) * 0.3, (dz / len) * 0.3, enemy.type.radius, enemy.type.height);
+    }
+    if (s.blast > 0) {
+      const radius = s.blast * (1 + 0);
+      for (const other of this.nearby(projectile.x, projectile.z, [])) {
+        if (other === enemy || other.hp <= 0) continue;
+        const d = Math.hypot(other.x - projectile.x, other.z - projectile.z);
+        if (d > radius) continue;
+        const push = [(other.x - projectile.x) / (d || 1), (other.z - projectile.z) / (d || 1)];
+        this.hurt(other, projectile.damage * 0.6 * (1 - d / radius), push, hooks);
+      }
+      this.burst(projectile.x, projectile.y, projectile.z, s.trail || projectile.colour, 14);
+      if (hooks.onBlast) hooks.onBlast(projectile, radius);
+    }
+    if (s.chain > 0 && enemy) {
+      let remaining = s.chain;
+      let from = enemy;
+      const struck = new Set([enemy.id]);
+      while (remaining > 0) {
+        let next = null;
+        for (const other of this.nearby(from.x, from.z, [])) {
+          if (other.hp <= 0 || struck.has(other.id)) continue;
+          const d = Math.hypot(other.x - from.x, other.z - from.z);
+          if (d > 4.5) continue;
+          if (!next || d < next.d) next = { d, enemy: other };
+        }
+        if (!next) break;
+        struck.add(next.enemy.id);
+        this.arcs.push({
+          from: [from.x, from.y + from.type.height * 0.5, from.z],
+          to: [next.enemy.x, next.enemy.y + next.enemy.type.height * 0.5, next.enemy.z],
+          colour: s.trail || projectile.colour, life: 0.13,
+        });
+        this.hurt(next.enemy, projectile.damage * 0.7, null, hooks);
+        from = next.enemy;
+        remaining -= 1;
+      }
+      if (hooks.onChain) hooks.onChain();
+    }
   }
 
   /* ------------------------------ update ------------------------------- */
 
   update(dt, player, hooks) {
     this.clock += dt;
+    let doorState = 0;
+    for (let i = 0; i < this.physics.doors.length; i += 1) {
+      if (this.physics.doors[i].open) doorState += 1 << (i % 30);
+    }
+    this.doorState = doorState;
     const playerFloor = this.physics.floorAt(player.y);
     this.flowAge -= dt;
     if (this.flowAge <= 0 || this.flowFloor !== playerFloor) {
       this.rebuildFlow(playerFloor, Math.floor(player.x / TILE_SIZE), Math.floor(player.z / TILE_SIZE));
-      this.flowAge = 0.22;
+      this.flowAge = 0.2;
     }
+    this.rebuildGrid();
 
     let aggro = 0;
+    const scratch = [];
     for (const enemy of this.enemies) {
       if (enemy.hp <= 0) continue;
-      this.updateEnemy(enemy, dt, player, playerFloor, hooks);
-      if (enemy.aggro) aggro += 1;
+      this.updateEnemy(enemy, dt, player, playerFloor, hooks, scratch);
+      if (enemy.aggro && enemy.floor === playerFloor) aggro += 1;
     }
     this.aggroCount = aggro;
     this.enemies = this.enemies.filter((e) => e.hp > 0);
+    this.reapAbandoned(playerFloor);
 
     this.updateProjectiles(dt, player, hooks);
     this.updateParticles(dt);
+    this.updateMotes(dt, player, playerFloor, hooks);
     this.updatePickups(dt, player, playerFloor, hooks);
+    for (const arc of this.arcs) arc.life -= dt;
+    this.arcs = this.arcs.filter((a) => a.life > 0);
   }
 
-  updateEnemy(enemy, dt, player, playerFloor, hooks) {
+  /**
+   * Forget monsters the player has walked away from.
+   *
+   * The hard cap is a frame-time budget, not a design statement, and sleeping
+   * enemies on floors the player already left were quietly consuming all of it:
+   * the swarm would sit at the cap with two thirds of it asleep three floors up,
+   * the spawner would find no room, and the floor you were actually standing on
+   * would go silent. Nothing observable is lost - these are dormant, unseen, and
+   * the spawner refills any floor you return to within seconds.
+   */
+  reapAbandoned(playerFloor) {
+    const spare = [];
+    for (let i = 0; i < this.enemies.length; i += 1) {
+      const e = this.enemies[i];
+      if (e.floor === playerFloor || e.type.boss) continue;
+      spare.push(i);
+    }
+    if (spare.length <= OFF_FLOOR_BUDGET) return;
+    // Oldest first: whatever has been abandoned longest is forgotten first.
+    const doomed = new Set(spare.slice(0, spare.length - OFF_FLOOR_BUDGET));
+    this.enemies = this.enemies.filter((_, i) => !doomed.has(i));
+  }
+
+  updateEnemy(enemy, dt, player, playerFloor, hooks, scratch) {
     const type = enemy.type;
     enemy.stateTime += dt;
     enemy.hurtFlash = Math.max(0, enemy.hurtFlash - dt);
     enemy.bob += dt * (enemy.state === 'chase' ? 9 : 3);
 
+    if (enemy.burnUntil > this.clock) {
+      if (this.hurt(enemy, enemy.burnDps * dt, null, hooks)) return;
+    }
+
     const dx = player.x - enemy.x;
     const dz = player.z - enemy.z;
     const distance = Math.hypot(dx, dz);
     const sameFloor = enemy.floor === playerFloor;
-
-    // Dormant monsters (the boss before its door opens) do nothing at all.
     if (enemy.dormant) return;
 
     if (!enemy.aggro) {
       if (!sameFloor) return;
-      const noticed = distance < (type.boss ? 26 : 19)
+      // Sight wakes a monster instantly. Hearing wakes it slowly, and hearing is
+      // what keeps the loop alive: your weapons never stop firing, so anything
+      // sharing a room-and-a-half with you is coming whether it saw you or not.
+      // Without this a player who holds one corner simply runs out of enemies.
+      if (distance < (type.boss ? 30 : 26)) enemy.earshot = (enemy.earshot || 0) + dt;
+      else enemy.earshot = 0;
+      const seen = distance < (type.boss ? 26 : 20)
         && this.physics.rayClear([enemy.x, enemy.y + type.height * 0.6, enemy.z], [player.x, player.y + 1.4, player.z]);
+      const noticed = seen || enemy.earshot > (type.boss ? 4 : 1.8);
       if (!noticed) return;
       enemy.aggro = true;
       enemy.state = 'chase';
@@ -376,24 +729,15 @@ export class Swarm {
       else if (hooks.onNotice) hooks.onNotice(enemy);
     }
 
-    if (!sameFloor) {
-      // Lost the player down a staircase: mill about rather than pathing blind.
-      enemy.state = 'idle';
-      return;
-    }
-
+    if (!sameFloor) { enemy.state = 'idle'; return; }
     enemy.facing = Math.atan2(dx, -dz);
     const inRange = distance <= type.range;
-    const canSee = this.physics.rayClear(
-      [enemy.x, enemy.y + type.height * 0.6, enemy.z],
-      [player.x, player.y + 1.4, player.z],
-    );
+    const slowed = enemy.slowUntil > this.clock;
 
     switch (enemy.state) {
       case 'stagger':
-        if (enemy.stateTime > 0.28) { enemy.state = 'chase'; enemy.stateTime = 0; }
+        if (enemy.stateTime > 0.26) { enemy.state = 'chase'; enemy.stateTime = 0; }
         break;
-
       case 'windup':
         if (enemy.stateTime >= type.windup) {
           this.releaseAttack(enemy, player, hooks);
@@ -401,13 +745,14 @@ export class Swarm {
           enemy.stateTime = 0;
         }
         break;
-
       case 'recover':
         if (enemy.stateTime >= type.recover) { enemy.state = 'chase'; enemy.stateTime = 0; }
         break;
-
       case 'chase':
       default: {
+        const canSee = !type.ranged || this.physics.rayClear(
+          [enemy.x, enemy.y + type.height * 0.6, enemy.z], [player.x, player.y + 1.4, player.z],
+        );
         if (inRange && canSee) {
           enemy.state = 'windup';
           enemy.stateTime = 0;
@@ -425,20 +770,35 @@ export class Swarm {
           mx = dx / distance;
           mz = dz / distance;
         }
-        // Keep the swarm from collapsing into one square.
-        for (const other of this.enemies) {
+        // Separation, from the spatial hash rather than every pair.
+        //
+        // It is normalised and weighted *below* the chase vector on purpose. An
+        // unbounded sum of push-apart forces beats the one unit vector pointing
+        // at the player as soon as a body has four neighbours, and the horde
+        // then jams into a static ring a few metres out and mills there. Keeping
+        // separation a nudge means a crowd spreads sideways while still closing.
+        let sx = 0;
+        let sz = 0;
+        this.nearby(enemy.x, enemy.z, scratch);
+        for (const other of scratch) {
           if (other === enemy || other.hp <= 0 || other.floor !== enemy.floor) continue;
           const ox = enemy.x - other.x;
           const oz = enemy.z - other.z;
           const d = Math.hypot(ox, oz);
-          const want = type.radius + other.type.radius + 0.14;
+          const want = (type.radius + other.type.radius) * 1.05 + 0.1;
           if (d > 0.001 && d < want) {
-            mx += (ox / d) * (want - d) * 1.7;
-            mz += (oz / d) * (want - d) * 1.7;
+            sx += (ox / d) * (want - d);
+            sz += (oz / d) * (want - d);
           }
         }
+        const sLen = Math.hypot(sx, sz);
+        if (sLen > 1e-4) {
+          mx += (sx / sLen) * 0.55;
+          mz += (sz / sLen) * 0.55;
+        }
         const len = Math.hypot(mx, mz) || 1;
-        const speed = type.speed * (enemy.kind === 'wraith' && distance < 7 ? 1.35 : 1);
+        let speed = type.speed * (enemy.kind === 'wraith' && distance < 7 ? 1.3 : 1);
+        if (slowed) speed *= 0.45;
         this.physics.move(enemy, (mx / len) * speed * dt, (mz / len) * speed * dt, type.radius, type.height);
         break;
       }
@@ -455,29 +815,21 @@ export class Swarm {
 
     if (type.ranged) {
       const dir = [dx / distance, dy / distance, dz / distance];
-      if (type.boss) {
-        // The Warden fires a spread, so strafing alone will not save you.
-        for (const spread of [-0.16, 0, 0.16]) {
-          const cos = Math.cos(spread);
-          const sin = Math.sin(spread);
-          this.spawnProjectile(
-            [enemy.x, eyeY, enemy.z],
-            [dir[0] * cos - dir[2] * sin, dir[1], dir[0] * sin + dir[2] * cos],
-            type.projectileSpeed, type.damage, type.eye, 'enemy',
-          );
-        }
-      } else {
-        this.spawnProjectile([enemy.x, eyeY, enemy.z], dir, type.projectileSpeed, type.damage, type.eye, 'enemy');
+      const spreadCount = type.boss ? [-0.2, -0.07, 0.07, 0.2] : [0];
+      for (const spread of spreadCount) {
+        const cos = Math.cos(spread);
+        const sin = Math.sin(spread);
+        this.spawnEnemyProjectile(
+          [enemy.x, eyeY, enemy.z],
+          [dir[0] * cos - dir[2] * sin, dir[1], dir[0] * sin + dir[2] * cos],
+          type.projectileSpeed, type.damage, type.eye,
+        );
       }
       if (hooks.onEnemyShoot) hooks.onEnemyShoot(enemy);
       return;
     }
-
-    // Melee only lands if the player is still there when the swing arrives.
     const reach = Math.hypot(player.x - enemy.x, player.z - enemy.z);
-    if (reach <= type.range + 0.5 && hooks.onPlayerHit) {
-      hooks.onPlayerHit(type.damage, enemy);
-    }
+    if (reach <= type.range + 0.5 && hooks.onPlayerHit) hooks.onPlayerHit(type.damage, enemy);
     if (enemy.kind === 'wraith') {
       const len = Math.hypot(dx, dz) || 1;
       this.physics.move(enemy, (dx / len) * 0.5, (dz / len) * 0.5, type.radius, type.height);
@@ -486,28 +838,77 @@ export class Swarm {
 
   updateProjectiles(dt, player, hooks) {
     const alive = [];
+    const scratch = [];
     for (const p of this.projectiles) {
-      const steps = Math.max(1, Math.ceil((Math.hypot(p.vx, p.vy, p.vz) * dt) / 0.28));
       let dead = false;
+      // Homing steers before the move, so the turn is visible.
+      if (p.weapon && p.weapon.homing > 0) {
+        const target = this.nearestTo(p.x, p.z, p.floor, 18);
+        if (target) {
+          const tx = target.x - p.x;
+          const ty = (target.y + target.type.height * 0.5) - p.y;
+          const tz = target.z - p.z;
+          const len = Math.hypot(tx, ty, tz) || 1;
+          const speed = Math.hypot(p.vx, p.vy, p.vz) || 1;
+          const k = Math.min(1, p.weapon.homing * dt);
+          p.vx += ((tx / len) * speed - p.vx) * k;
+          p.vy += ((ty / len) * speed - p.vy) * k;
+          p.vz += ((tz / len) * speed - p.vz) * k;
+        }
+      }
+
+      const speed = Math.hypot(p.vx, p.vy, p.vz);
+      const steps = Math.max(1, Math.ceil((speed * dt) / 0.32));
       for (let i = 0; i < steps && !dead; i += 1) {
         const from = [p.x, p.y, p.z];
         p.x += (p.vx * dt) / steps;
         p.y += (p.vy * dt) / steps;
         p.z += (p.vz * dt) / steps;
         if (!this.physics.rayClear(from, [p.x, p.y, p.z])) {
-          this.burst(p.x, p.y, p.z, p.colour, 7);
+          this.burst(p.x, p.y, p.z, p.colour, 5);
+          if (p.owner === 'player') this.applyImpact(p, null, hooks);
           if (hooks.onProjectileWall) hooks.onProjectileWall(p);
           dead = true;
           break;
         }
         if (p.owner === 'enemy') {
           const d = Math.hypot(p.x - player.x, p.y - (player.y + 1.0), p.z - player.z);
-          if (d < 0.62) {
+          if (d < 0.6) {
             if (hooks.onPlayerHit) hooks.onPlayerHit(p.damage, null);
-            this.burst(p.x, p.y, p.z, p.colour, 9);
+            this.burst(p.x, p.y, p.z, p.colour, 7);
             dead = true;
             break;
           }
+          continue;
+        }
+        // Player shot: check the enemies in this cell only.
+        this.nearby(p.x, p.z, scratch);
+        for (const enemy of scratch) {
+          if (enemy.hp <= 0) continue;
+          if (p.hits && p.hits.has(enemy.id)) continue;
+          const girth = (enemy.type.radius + p.size) * enemy.scale;
+          const dx = enemy.x - p.x;
+          const dz = enemy.z - p.z;
+          if (dx * dx + dz * dz > girth * girth) continue;
+          const dy = (enemy.y + enemy.type.height * 0.5) - p.y;
+          if (Math.abs(dy) > enemy.type.height * 0.75) continue;
+
+          const isCrit = Math.random() < (p.crit || 0);
+          const dealt = p.damage * (isCrit ? 2 : 1);
+          const knock = [p.vx, p.vz];
+          const klen = Math.hypot(knock[0], knock[1]) || 1;
+          this.applyImpact(p, enemy, hooks);
+          const killed = this.hurt(enemy, dealt, [knock[0] / klen, knock[1] / klen], hooks);
+          this.burst(p.x, p.y, p.z, p.weapon ? p.weapon.trail : p.colour, isCrit ? 9 : 4);
+          if (hooks.onHit) hooks.onHit(p, enemy, isCrit, killed);
+          if (p.pierce > 0) {
+            p.pierce -= 1;
+            if (!p.hits) p.hits = new Set();
+            p.hits.add(enemy.id);
+          } else {
+            dead = true;
+          }
+          break;
         }
       }
       p.life -= dt;
@@ -527,25 +928,71 @@ export class Swarm {
       p.z += p.vz * dt;
       alive.push(p);
     }
-    this.particles = alive.slice(-420);
+    this.particles = alive.length > 640 ? alive.slice(-640) : alive;
+  }
+
+  /**
+   * Essence motes. They arc out of a kill, then home in hard - collection has to
+   * feel automatic, because the moment you are choosing whether to walk over a
+   * reward is the moment the loop stops being about fighting.
+   */
+  updateMotes(dt, player, playerFloor, hooks) {
+    const alive = [];
+    const radius = 5.5 * (1 + (hooks.pickupBonus || 0));
+    for (const m of this.motes) {
+      m.age += dt;
+      if (m.floor === playerFloor) {
+        const dx = player.x - m.x;
+        const dz = player.z - m.z;
+        const dy = (player.y + 0.9) - m.y;
+        const d = Math.hypot(dx, dz);
+        const len = Math.hypot(dx, dy, dz) || 1;
+        if (m.age > 0.35 && d < radius) {
+          // Close: snap in hard, so collection feels like suction.
+          const pull = 30;
+          m.vx = (dx / len) * pull;
+          m.vy = (dy / len) * pull;
+          m.vz = (dz / len) * pull;
+        } else if (m.age > 1.1) {
+          // Far: drift home anyway. Nothing a kill earned is ever stranded on
+          // the far side of the floor - the bar has to keep filling or the loop
+          // stops being about fighting.
+          const pull = 4.5;
+          m.vx += ((dx / len) * pull - m.vx) * Math.min(1, dt * 2.2);
+          m.vy += ((dy / len) * pull - m.vy) * Math.min(1, dt * 2.2);
+          m.vz += ((dz / len) * pull - m.vz) * Math.min(1, dt * 2.2);
+        } else {
+          m.vy -= 11 * dt;
+        }
+        if (d < 0.9 && m.age > 0.2) {
+          if (hooks.onEssence) hooks.onEssence(m.value);
+          continue;
+        }
+      } else {
+        m.vy -= 11 * dt;
+      }
+      m.x += m.vx * dt;
+      m.y += m.vy * dt;
+      m.z += m.vz * dt;
+      if (m.y < -400) continue;
+      alive.push(m);
+    }
+    this.motes = alive;
   }
 
   updatePickups(dt, player, playerFloor, hooks) {
     const alive = [];
+    const radius = 2.8 * (1 + (hooks.pickupBonus || 0));
     for (const item of this.pickups) {
       item.bob += dt * 3;
       if (item.floor === playerFloor && Math.abs(item.y - player.y) < 2.2) {
         const d = Math.hypot(item.x - player.x, item.z - player.z);
-        // Drift toward the player once they are near. A reward you have to walk
-        // exactly over is a reward most players never actually get.
-        if (d < 2.8 && d > 0.001) {
-          const pull = Math.min(1, (2.8 - d) / 2.8) * 6 * dt;
+        if (d < radius && d > 0.001) {
+          const pull = Math.min(1, (radius - d) / radius) * 7 * dt;
           item.x += ((player.x - item.x) / d) * pull;
           item.z += ((player.z - item.z) / d) * pull;
         }
-        if (d < 1.1) {
-          if (hooks.onPickup && hooks.onPickup(item)) continue;
-        }
+        if (d < 1.1 && hooks.onPickup && hooks.onPickup(item)) continue;
       }
       alive.push(item);
     }
@@ -554,19 +1001,7 @@ export class Swarm {
 
   /* ---------------------------- rendering ------------------------------ */
 
-  /** The atlas lookup, handed over once the renderer has built it. */
-  setFrames(frames) {
-    this.frames = frames;
-  }
-
-  /**
-   * Billboard descriptors for everything alive.
-   *
-   * Enemies pick a walk frame from their bob and switch to the attack pose while
-   * winding up; the tint carries the hurt flash and the wind-up glow, so one set
-   * of art covers every state.
-   */
-  spriteList() {
+  spriteList(orbits) {
     const frames = this.frames;
     const out = [];
     if (!frames) return out;
@@ -580,27 +1015,22 @@ export class Swarm {
       const frame = frames.get(`${enemy.kind}${winding ? 2 : step}`) || frames.get(`${enemy.kind}0`);
       if (!frame) continue;
       const flash = enemy.hurtFlash > 0;
-      const tint = flash ? [2.4, 2.2, 2.2] : [1, 1, 1];
-      // Swelling on the wind-up reads even in peripheral vision.
-      const height = type.height * (1 + tell * 0.12);
+      const chilled = enemy.slowUntil > this.clock;
+      const tint = flash ? [2.6, 2.4, 2.4]
+        : chilled ? [0.62, 0.86, 1.25]
+          : enemy.elite ? [1.35, 1.05, 0.75] : [1, 1, 1];
+      const height = type.height * enemy.scale * (1 + tell * 0.12);
       const y = enemy.y + Math.sin(enemy.bob) * 0.03;
       const w = height * frame.aspect;
       out.push({ x: enemy.x, y, z: enemy.z, h: height, w, frame, tint, emissive: flash ? 0.7 : 0 });
 
-      // The ember core rides as a second, unlit quad. It is the one part of a
-      // creature that stays visible in a black corridor, and it brightens as the
-      // thing winds up - so the telegraph and the aim point are the same pixel.
-      const glowName = winding && frames.has(`${enemy.kind}Glow2`)
-        ? `${enemy.kind}Glow2`
-        : `${enemy.kind}Glow`;
+      const glowName = winding && frames.has(`${enemy.kind}Glow2`) ? `${enemy.kind}Glow2` : `${enemy.kind}Glow`;
       const glow = frames.get(glowName);
       if (glow) {
-        const heat = 1 + tell * 1.4;
+        const heat = 1 + tell * 1.5 + (enemy.elite ? 0.5 : 0);
         out.push({
-          x: enemy.x, y, z: enemy.z, h: height, w,
-          frame: glow,
-          tint: [heat, heat * 0.92, heat * 0.8],
-          emissive: 1,
+          x: enemy.x, y, z: enemy.z, h: height, w, frame: glow,
+          tint: [heat, heat * 0.92, heat * 0.8], emissive: 1,
         });
       }
     }
@@ -608,9 +1038,23 @@ export class Swarm {
     const shot = frames.get('shot');
     const shotHot = frames.get('shotHot');
     for (const p of this.projectiles) {
-      const frame = p.damage > 15 ? (shotHot || shot) : shot;
+      const frame = p.owner === 'enemy' ? (shotHot || shot) : shot;
       if (!frame) continue;
-      out.push({ x: p.x, y: p.y - 0.2, z: p.z, w: 0.42, h: 0.42, frame, tint: [1, 1, 1], emissive: 1 });
+      const size = p.size * 2.2;
+      out.push({
+        x: p.x, y: p.y - size / 2, z: p.z, w: size, h: size, frame,
+        tint: [p.colour[0] * 1.9, p.colour[1] * 1.9, p.colour[2] * 1.9], emissive: 1,
+      });
+    }
+
+    for (const o of orbits || []) {
+      const frame = frames.get('shot');
+      if (!frame) continue;
+      const size = o.size * 2.4;
+      out.push({
+        x: o.x, y: o.y - size / 2, z: o.z, w: size, h: size, frame,
+        tint: [o.colour[0] * 1.9, o.colour[1] * 1.9, o.colour[2] * 1.9], emissive: 1,
+      });
     }
 
     const spark = frames.get('spark');
@@ -619,10 +1063,31 @@ export class Swarm {
         const fade = Math.max(0, p.life / p.maxLife);
         const size = p.size * 3.2 * (0.35 + fade);
         out.push({
-          x: p.x, y: p.y - size / 2, z: p.z, w: size, h: size,
-          frame: spark,
-          tint: [p.colour[0] * 1.6, p.colour[1] * 1.6, p.colour[2] * 1.6],
-          emissive: fade,
+          x: p.x, y: p.y - size / 2, z: p.z, w: size, h: size, frame: spark,
+          tint: [p.colour[0] * 1.7, p.colour[1] * 1.7, p.colour[2] * 1.7], emissive: fade,
+        });
+      }
+      // Chain arcs, drawn as a line of sparks between the two bodies.
+      for (const arc of this.arcs) {
+        for (let i = 0; i <= 6; i += 1) {
+          const t = i / 6;
+          out.push({
+            x: arc.from[0] + (arc.to[0] - arc.from[0]) * t,
+            y: arc.from[1] + (arc.to[1] - arc.from[1]) * t,
+            z: arc.from[2] + (arc.to[2] - arc.from[2]) * t,
+            w: 0.22, h: 0.22, frame: spark,
+            tint: [arc.colour[0] * 2.2, arc.colour[1] * 2.2, arc.colour[2] * 2.2], emissive: 1,
+          });
+        }
+      }
+    }
+
+    const moteFrame = frames.get('mote');
+    if (moteFrame) {
+      for (const m of this.motes) {
+        out.push({
+          x: m.x, y: m.y, z: m.z, w: 0.26, h: 0.26, frame: moteFrame,
+          tint: [1.4, 1.4, 1.6], emissive: 1,
         });
       }
     }
@@ -634,42 +1099,34 @@ export class Swarm {
       out.push({ x: item.x, y: item.y + lift, z: item.z, w: 0.5, h: 0.5, frame, tint: [1, 1, 1], emissive: 0.85 });
     }
 
-    const keyFrame = frames.get('key');
-    if (keyFrame) {
-      for (const prop of this.dungeon.props) {
-        if (prop.kind !== 'key' || prop.taken) continue;
-        const lift = 0.45 + Math.sin(this.clock * 2 + prop.x) * 0.09;
-        out.push({
-          x: prop.x, y: prop.y + lift, z: prop.z,
-          h: 0.6, w: 0.6 * keyFrame.aspect,
-          frame: keyFrame,
-          tint: [prop.color[0] * 1.5, prop.color[1] * 1.5, prop.color[2] * 1.5],
-          emissive: 1,
-        });
-      }
-    }
-
     return out;
   }
 
-  /** Light sources the renderer should consider this frame. */
   lights() {
     const out = [];
+    // Only the nearest few shots earn a light; the renderer keeps eight slots.
+    let budget = 6;
     for (const p of this.projectiles) {
-      out.push({ pos: [p.x, p.y, p.z], colour: p.colour, intensity: 0.9 });
+      if (budget-- <= 0) break;
+      out.push({ pos: [p.x, p.y, p.z], colour: p.colour, intensity: 0.85 });
+    }
+    for (const arc of this.arcs) {
+      out.push({ pos: arc.to, colour: arc.colour, intensity: 1.6 });
     }
     for (const item of this.pickups) {
-      const colour = item.kind === 'health' ? [1.0, 0.32, 0.38] : [0.35, 0.85, 1.0];
+      const colour = item.kind === 'health' ? rgb('blood', 3) : rgb('ice', 3);
       out.push({ pos: [item.x, item.y + 0.5, item.z], colour, intensity: 0.5 });
     }
     for (const enemy of this.enemies) {
       if (enemy.state !== 'windup' || enemy.hp <= 0) continue;
-      out.push({ pos: [enemy.x, enemy.y + enemy.type.height * 0.8, enemy.z], colour: enemy.type.eye, intensity: 1.1 });
+      out.push({ pos: [enemy.x, enemy.y + enemy.type.height * 0.8, enemy.z], colour: enemy.type.eye, intensity: 1.2 });
     }
     return out;
   }
 
   aliveOnFloor(floorIndex) {
-    return this.enemies.filter((e) => e.hp > 0 && e.floor === floorIndex).length;
+    let n = 0;
+    for (const e of this.enemies) if (e.hp > 0 && e.floor === floorIndex) n += 1;
+    return n;
   }
 }

@@ -10,7 +10,7 @@ with its own entry point (`dungeon.html`); it is documented in
 
 ## Application startup flow
 
-1. **`index.html`** loads the external Three.js and Tone.js bundles and then imports
+1. **`maze.html`** loads the external Three.js and Tone.js bundles and then imports
    the ES module entrypoint `src/main.js`.
 2. **`src/main.js`** waits for the `DOMContentLoaded` event, verifies that both
    Three and Tone are available on the `window`, instantiates

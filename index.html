@@ -3,61 +3,197 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>NEXUS MAZE - Final Edition v6 (Stable Audio)</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="./styles/main.css" />
+  <title>Nexus Depths &amp; Nexus Maze - playable WebGL demos</title>
+  <meta name="description" content="Playable WebGL demos: Nexus Depths, a first-person bullet heaven with a procedural 3D dungeon generator, plus the generator lab and sprite reference." />
+  <link rel="icon" href="data:," />
+  <style>
+    /*
+     * Colours here are the same eight ramps the game itself is drawn from
+     * (src/dungeon/palette.js). This page is the front door, so it is built out
+     * of the same set as the rooms behind it.
+     */
+    :root {
+      --void-0: #080b12; --void-1: #0f1622; --void-2: #1a2436; --void-3: #2b3a55;
+      --stone-2: #544a52; --stone-4: #8c7c75;
+      --bone-3: #d8b784; --bone-4: #f5e3b8;
+      --verdigris-4: #7ad39b;
+      --ember-3: #f2912f; --ember-4: #ffd166;
+      --arcane-3: #8560d4;
+      --ice-3: #3fc9ff; --ice-4: #a8ecff;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--void-0);
+      color: var(--bone-4);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      line-height: 1.55;
+      /* A faint vignette, so the page reads as lit from the middle like the game. */
+      background-image: radial-gradient(ellipse at 50% 0%, #131b2b 0%, #080b12 62%);
+      min-height: 100vh;
+    }
+
+    .wrap { max-width: 860px; margin: 0 auto; padding: 56px 20px 72px; }
+
+    header { border-bottom: 2px solid var(--void-3); padding-bottom: 26px; margin-bottom: 34px; }
+
+    h1 {
+      margin: 0 0 6px;
+      font-size: clamp(28px, 6vw, 46px);
+      letter-spacing: 0.11em;
+      color: var(--bone-4);
+      text-shadow: 0 2px 0 var(--void-0);
+    }
+
+    .tagline { margin: 0; color: var(--ember-4); letter-spacing: 0.16em; font-size: 13px; }
+
+    .blurb { color: var(--stone-4); margin: 18px 0 0; max-width: 62ch; }
+
+    .cards { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+
+    .card {
+      display: block;
+      text-decoration: none;
+      color: inherit;
+      background: rgba(15, 22, 34, 0.86);
+      border: 2px solid var(--void-3);
+      padding: 20px 20px 22px;
+      transition: border-color 0.14s, transform 0.14s, background 0.14s;
+    }
+
+    .card:hover, .card:focus-visible {
+      border-color: var(--tone, var(--ice-3));
+      background: rgba(26, 36, 54, 0.9);
+      transform: translateY(-2px);
+      outline: none;
+    }
+
+    .card h2 {
+      margin: 0 0 2px;
+      font-size: 19px;
+      letter-spacing: 0.07em;
+      color: var(--tone, var(--ice-3));
+    }
+
+    .kind { display: block; font-size: 11px; letter-spacing: 0.19em; color: var(--stone-2); margin-bottom: 12px; }
+    .card p { margin: 0 0 14px; color: var(--stone-4); font-size: 14px; }
+
+    .play {
+      display: inline-block;
+      font-size: 12px;
+      letter-spacing: 0.15em;
+      color: var(--void-0);
+      background: var(--tone, var(--ice-3));
+      padding: 5px 12px;
+    }
+
+    .keys { margin-top: 12px; font-size: 12px; color: var(--stone-2); letter-spacing: 0.04em; }
+    kbd {
+      background: var(--void-2); border: 1px solid var(--void-3); border-bottom-width: 2px;
+      border-radius: 2px; padding: 0 4px; font: inherit; font-size: 11px; color: var(--bone-3);
+    }
+
+    .featured { --tone: var(--ember-4); grid-column: 1 / -1; }
+    .featured h2 { font-size: 25px; }
+    .featured p { font-size: 15px; color: var(--bone-3); }
+
+    .note {
+      margin-top: 34px; padding: 16px 18px; border-left: 3px solid var(--void-3);
+      color: var(--stone-2); font-size: 13px;
+    }
+
+    footer { margin-top: 44px; padding-top: 22px; border-top: 2px solid var(--void-3); font-size: 13px; color: var(--stone-2); }
+    a { color: var(--ice-3); }
+    footer a:hover { color: var(--ice-4); }
+
+    @media (prefers-reduced-motion: reduce) {
+      .card { transition: none; }
+      .card:hover, .card:focus-visible { transform: none; }
+    }
+  </style>
 </head>
 <body>
-  <div class="custom-cursor" id="cursor"></div>
-  <div id="damageFlash"></div>
+  <div class="wrap">
+    <header>
+      <h1>NEXUS DEPTHS</h1>
+      <p class="tagline">PROCEDURAL 3D DUNGEONS &middot; RAW WEBGL &middot; NO ASSETS</p>
+      <p class="blurb">
+        Four playable pages, all client-side. Nothing is bundled, nothing is
+        downloaded: every sprite is painted at boot with <code>fillRect</code>,
+        every sound is synthesised at runtime, and the renderer is raw WebGL with
+        no engine underneath it.
+      </p>
+    </header>
 
-  <div id="loading" class="fullscreen-overlay loading-overlay">
-    <div class="overlay-title">NEXUS MAZE</div>
-    <div class="overlay-subtitle">Final Edition</div>
-    <div class="progress-bar">
-      <div class="progress-fill" id="progress"></div>
+    <div class="cards">
+      <a class="card featured" href="./dungeon.html">
+        <span class="kind">THE GAME</span>
+        <h2>Nexus Depths</h2>
+        <p>
+          A bullet heaven in first person. Your weapons fire themselves; your job
+          is where you stand and where you look. Kill the floor's quota to crack
+          open the way down, then choose: descend to safety, or stay and grow
+          stronger while the spawn rate keeps climbing. Every level deals you three
+          procedurally generated capabilities &mdash; 2,304 base weapon identities
+          before rarity &mdash; so no two runs hand you the same build.
+        </p>
+        <span class="play">PLAY</span>
+        <div class="keys">
+          <kbd>WASD</kbd> move &middot; <kbd>Shift</kbd> sprint &middot;
+          <kbd>Mouse</kbd> look &middot; <kbd>LMB</kbd> surge &middot;
+          <kbd>RMB</kbd>/<kbd>Space</kbd> blast &middot; <kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> choose
+        </div>
+      </a>
+
+      <a class="card" href="./lab.html" style="--tone: var(--verdigris-4)">
+        <span class="kind">TOOLING</span>
+        <h2>Generator Lab</h2>
+        <p>
+          The same dungeons with the layout tooling exposed: cutaway view, the
+          solution route, and a validation panel that flood-fills the compiled
+          world using the player's own collision query &mdash; so a pass means it
+          is genuinely walkable, not merely connected on paper.
+        </p>
+        <span class="play">OPEN</span>
+        <div class="keys"><kbd>WASD</kbd> move &middot; <kbd>M</kbd> cutaway &middot; auto-walk plays it through</div>
+      </a>
+
+      <a class="card" href="./lab-sprites.html" style="--tone: var(--arcane-3)">
+        <span class="kind">REFERENCE</span>
+        <h2>Palette &amp; Cast</h2>
+        <p>
+          The art reference: all 39 colours with hex values across eight
+          hue-shifted ramps, the full cast at 5&times;, and the reasoning behind
+          the rules that keep it readable.
+        </p>
+        <span class="play">OPEN</span>
+      </a>
+
+      <a class="card" href="./maze.html" style="--tone: var(--ice-3)">
+        <span class="kind">EARLIER PROTOTYPE</span>
+        <h2>Nexus Maze</h2>
+        <p>
+          The original maze runner this repository started as: Three.js and
+          Tone.js, an entity component system, and a state machine driving enemy
+          behaviour.
+        </p>
+        <span class="play">PLAY</span>
+        <div class="keys"><kbd>WASD</kbd> move &middot; <kbd>Shift</kbd> boost &middot; <kbd>Space</kbd> dash &middot; <kbd>C</kbd> camera</div>
+      </a>
     </div>
-    <div id="loading-status">Initializing quantum maze systems...</div>
+
+    <p class="note">
+      Nexus Depths wants a keyboard, a mouse and pointer lock, so it needs a
+      desktop browser. It grabs the pointer when you press Descend; <kbd>Esc</kbd>
+      releases it and pauses.
+    </p>
+
+    <footer>
+      Source, design notes and the measurements behind the balance:
+      <a href="https://github.com/TACITVS/WebGL_Maze">github.com/TACITVS/WebGL_Maze</a>
+    </footer>
   </div>
-
-  <div id="gameOverScreen" class="fullscreen-overlay" style="display: none;">
-    <div class="overlay-title">GAME OVER</div>
-    <div class="overlay-subtitle" id="finalScore">FINAL SCORE: 0</div>
-    <button id="restartButton" class="overlay-button">RESTART</button>
-  </div>
-
-  <div id="gameWonScreen" class="fullscreen-overlay" style="display: none;">
-    <div class="overlay-title">VICTORY</div>
-    <div class="overlay-subtitle">You have conquered the Nexus Maze!</div>
-    <div class="overlay-subtitle" id="finalScoreWon">FINAL SCORE: 0</div>
-    <button id="restartButtonWon" class="overlay-button">PLAY AGAIN</button>
-  </div>
-
-  <div id="ui" style="display: none;">
-    <div class="ui-title">⬢ NEXUS CONTROL</div>
-    <div class="ui-stat"><span class="ui-label">SCORE</span><span class="ui-value" id="score">0</span></div>
-    <div class="ui-stat"><span class="ui-label">TIME</span><span class="ui-value" id="time">0s</span></div>
-    <div class="ui-stat"><span class="ui-label">LEVEL</span><span class="ui-value" id="level">1</span></div>
-    <div class="ui-stat"><span class="ui-label">HEALTH</span><span class="ui-value" id="health">💚 100%</span></div>
-    <div class="ui-stat"><span class="ui-label">ENERGY</span><span class="ui-value" id="energy">⚡ 100%</span></div>
-    <div class="ui-stat"><span class="ui-label">COORDS</span><span class="ui-value" id="position">(0, 0)</span></div>
-    <div id="controls">
-      <div class="control-group"><strong>MOVEMENT:</strong> WASD / Arrows</div>
-      <div class="control-group"><strong>BOOST:</strong> Hold SHIFT</div>
-      <div class="control-group" id="jump-status"><strong>PHASE DASH:</strong> SPACE</div>
-      <div class="control-group"><strong>NEW MAZE:</strong> R Key</div>
-      <div class="control-group"><strong>CAMERA:</strong> C Key</div>
-      <div class="control-group"><strong>SOUND:</strong> M Key</div>
-    </div>
-  </div>
-
-  <canvas id="minimap" style="display: none;"></canvas>
-  <button id="audio-button" style="display: none;">🔊</button>
-
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
-  <script type="module" src="./src/main.js"></script>
 </body>
 </html>

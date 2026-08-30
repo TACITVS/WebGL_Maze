@@ -1,8 +1,34 @@
-# Nexus Maze
+# Nexus Depths &amp; Nexus Maze
 
-Nexus Maze is a WebGL powered maze runner built with Three.js and Tone.js. The
-project demonstrates a modular architecture with an entity component system
-(ECS), a finite state machine for enemy AI and a rich reactive UI.
+Two WebGL projects in one repository. **Nexus Depths** is a first-person bullet
+heaven built on a procedural 3D dungeon generator, in raw WebGL with no engine,
+no bundler and no binary assets. **Nexus Maze** is the earlier maze runner the
+repository started as, built with Three.js and Tone.js, demonstrating a modular
+architecture with an entity component system (ECS), a finite state machine for
+enemy AI and a reactive UI.
+
+## Play it live
+
+Everything is static and client-side, so it runs straight from GitHub Pages:
+
+| | |
+| --- | --- |
+| **[Nexus Depths](https://tacitvs.github.io/WebGL_Maze/dungeon.html)** | the game |
+| **[Generator Lab](https://tacitvs.github.io/WebGL_Maze/lab.html)** | cutaway view, solution route, validation panel |
+| **[Palette &amp; Cast](https://tacitvs.github.io/WebGL_Maze/lab-sprites.html)** | the art reference |
+| **[Nexus Maze](https://tacitvs.github.io/WebGL_Maze/maze.html)** | the earlier prototype |
+
+Or start at **[the hub](https://tacitvs.github.io/WebGL_Maze/)**.
+
+Nexus Depths needs a desktop browser: it wants a keyboard, a mouse and pointer
+lock.
+
+> **Enabling this on a fork:** in *Settings → Pages*, set **Source** to
+> **GitHub Actions**. `.github/workflows/pages.yml` then publishes the
+> repository on every push to `main`. There is no build step — it uploads the
+> repository as-is — but it does run `tools/check-links.mjs` first, which walks
+> every page and the whole module graph behind it and fails the deploy on a
+> broken reference.
 
 ## Development quick start
 
@@ -16,10 +42,11 @@ python -m http.server 8000
 
 ```
 .
-├── index.html          # Nexus Maze: bootstraps the UI shell and loads the entrypoint
+├── index.html          # Landing page linking the four demos
 ├── dungeon.html        # Nexus Depths: the playable dungeon crawler
 ├── lab.html            # Nexus Depths: generator + validation tooling
 ├── lab-sprites.html    # Nexus Depths: palette + sprite reference
+├── maze.html           # Nexus Maze: bootstraps the UI shell and loads the entrypoint
 ├── styles/             # Global styling resources
 ├── src/
 │   ├── audio/          # Tone.js integration and sound design
@@ -30,6 +57,10 @@ python -m http.server 8000
 │   ├── state/          # Game state managers
 │   ├── ui/             # UI orchestration helpers
 │   └── main.js         # Application entrypoint
+├── tools/
+│   └── check-links.mjs # Deploy guard: every page and import must resolve
+├── .github/workflows/
+│   └── pages.yml       # Publishes the demos to GitHub Pages
 ├── docs/
 │   ├── ARCHITECTURE.md         # Nexus Maze reference
 │   ├── DUNGEON_GENERATION.md   # How the dungeon generator works
@@ -39,16 +70,24 @@ python -m http.server 8000
 
 ## Nexus Depths — playable dungeon crawler
 
-Open `http://localhost:8000/dungeon.html` and press **Descend**.
+Open `http://localhost:8000/dungeon.html` and press **Descend** — or play it
+live at
+[tacitvs.github.io/WebGL_Maze/dungeon.html](https://tacitvs.github.io/WebGL_Maze/dungeon.html).
 
-A first-person roguelike run: four floors down, keys to find, monsters that call
-their neighbours when they spot you, and the Warden waiting in the deepest
-chamber. Kills within four seconds chain into a score multiplier up to ×5, so the
-loop rewards pushing forward rather than retreating. Runs last two to three
-minutes and your best score persists.
+A **bullet heaven in first person**. Your weapons fire themselves; your job is
+where you stand and where you look. Kill the floor's quota to crack open the way
+down, then decide whether to leave or stay and farm while the spawn rate keeps
+climbing. Four floors, then the Warden.
+
+Every kill drops essence, every bar-fill deals you three **procedurally
+generated** capabilities to choose between, and no two runs hand you the same
+ones: weapons are assembled from 8 cores × 6 elements × 12 prefixes × 4 rarities,
+each levelling nine times. Kills chain into a multiplier whose window tightens as
+it climbs and which halves when you are hit, so the meter is only ever falling.
 
 - **WASD** move · **Shift** sprint · **mouse** look
-- **Left click** pulse · **Right click** / **Space** blast · **Esc** pause
+- **Left click** surge (fire everything at once) · **Right click** / **Space**
+  blast · **1 2 3** choose a card · **Esc** pause
 
 It renders at 340p and scales up with nearest-neighbour filtering, so the pixels
 are real. Every colour — sprites, masonry, props, HUD, menus — comes from one

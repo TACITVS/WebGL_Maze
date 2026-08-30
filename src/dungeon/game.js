@@ -1,13 +1,19 @@
 /**
  * Nexus Depths - the game.
  *
- * A run is one generated dungeon. You start on depth 1 with a pulse weapon,
- * fight down four floors collecting the keys that open the way, and destroy the
- * Warden in the deepest chamber. Kills feed a combo multiplier that decays in
- * seconds, so the loop rewards pushing forward rather than turtling.
+ * A bullet heaven in first person. Your weapons fire themselves; your job is
+ * where you stand and where you look. Every kill drops essence, essence fills a
+ * bar, and every level hands you three procedurally generated capabilities to
+ * choose between - so the run is a build you assemble under pressure, and no two
+ * runs hand you the same one.
+ *
+ * The loop is deliberately short: kill the depth's quota to crack open the way
+ * down, then decide whether to leave or keep farming while the spawn rate keeps
+ * climbing. Descending is safety; staying is power. That choice, every ninety
+ * seconds, is the whole game.
  */
 
-import { generateDungeon, ROOM_TYPE } from './generator.js';
+import { generateDungeon } from './generator.js';
 import { compileDungeon, Box } from './compiler.js';
 import { DungeonPhysics } from './physics.js';
 import { Renderer } from './renderer.js';
@@ -16,8 +22,10 @@ import { Hud } from './hud.js';
 import { Swarm } from './entities.js';
 import { AudioEngine } from './audio.js';
 import { buildSpriteAtlas } from './sprites.js';
+import { Loadout, generateWeapon, recomputeWeapon } from './loadout.js';
 import { RNG } from './rng.js';
 import { TILE_SIZE } from './grid.js';
+import { rgb } from './palette.js';
 
 const MOVE_CODES = new Set([
   'KeyW', 'KeyA', 'KeyS', 'KeyD',
@@ -26,22 +34,24 @@ const MOVE_CODES = new Set([
 ]);
 
 const PLAYER = {
-  maxHp: 120,
-  maxEnergy: 100,
-  energyRegen: 24,
-  regenDelay: 0.32,
-  walkSpeed: 3.3,
-  runSpeed: 5.5,
+  maxHull: 130,
+  maxCharge: 100,
+  chargeRegen: 19,
+  walkSpeed: 3.9,
+  runSpeed: 6.2,
   eye: 1.62,
-  invulnAfterHit: 0.45,
+  invulnAfterHit: 0.42,
 };
 
-const PULSE = { cost: 7, damage: 17, cooldown: 0.13, range: 46 };
-const BLAST = { cost: 34, damage: 52, splash: 34, radius: 3.3, cooldown: 0.6, range: 40 };
-
-const COMBO_WINDOW = 4.0;
+const SURGE = { cost: 26, cooldown: 0.55 };
+const BLAST = { cost: 38, damage: 60, radius: 4.2, cooldown: 0.8 };
 
 const DEPTH_NAMES = ['Flooded Undercroft', 'Bone Galleries', 'Verdigris Works', 'Emberforge'];
+
+/** Essence needed for the next level. Early ones land fast on purpose. */
+function xpForLevel(level) {
+  return Math.round(9 + Math.pow(level, 1.55) * 4.2);
+}
 
 export class Game {
   constructor() {
@@ -62,7 +72,6 @@ export class Game {
     };
 
     this.renderer = new Renderer(this.el.canvas);
-    // The sprite sheet is painted once at boot and lives on the GPU thereafter.
     const atlas = buildSpriteAtlas();
     this.renderer.setSpriteAtlas(atlas.canvas);
     this.spriteFrames = atlas.frames;
@@ -72,15 +81,13 @@ export class Game {
 
     this.state = 'title';
     this.keys = new Set();
-    this.firing = false;
+    this.surging = false;
     this.blasting = false;
     this.pointerLocked = false;
     this.sensitivity = 0.0019;
-    this.invertY = false;
     this.lastFrame = performance.now();
     this.accumulator = 0;
     this.stepSeconds = 1 / 120;
-    this.toasts = [];
 
     this.bindInput();
     window.addEventListener('resize', () => this.syncResolution());
@@ -107,7 +114,10 @@ export class Game {
 
   startRun(seed) {
     this.seed = seed;
-    this.dungeon = generateDungeon(seed);
+    this.rng = new RNG(seed ^ 0x9e3779b9);
+    // No locks: the descent is gated on kills, not on searching. The generator
+    // still supports them and the lab still exercises them.
+    this.dungeon = generateDungeon(seed, { locks: 0 });
     this.compiled = compileDungeon(this.dungeon);
     this.physics = new DungeonPhysics(this.dungeon, this.compiled);
     this.renderer.setDungeon(this.dungeon, this.compiled);
@@ -115,41 +125,47 @@ export class Game {
     this.swarm = new Swarm(this.dungeon, this.physics, new RNG(seed ^ 0x5f3759df)).populate();
     this.swarm.setFrames(this.spriteFrames);
 
+    this.loadout = new Loadout(this.rng);
+    this.loadout.addWeapon(this.startingWeapon());
+
     const startRoom = this.dungeon.roomsById.get(this.dungeon.start);
     const plan = this.dungeon.floors[startRoom.floor];
     const spawn = plan.worldOf(startRoom.cx, startRoom.cz);
     this.player = {
-      x: spawn[0],
-      z: spawn[2],
+      x: spawn[0], z: spawn[2],
       y: this.physics.canOccupy(spawn[0], spawn[2], spawn[1]) ?? plan.elevation,
-      yaw: 0,
-      pitch: 0,
-      eye: PLAYER.eye,
-      hp: PLAYER.maxHp,
-      energy: PLAYER.maxEnergy,
-      invuln: 0,
-      regenHold: 0,
+      yaw: 0, pitch: 0, eye: PLAYER.eye,
+      hull: PLAYER.maxHull, charge: PLAYER.maxCharge,
+      invuln: 0, regenHold: 0,
     };
 
-    this.held = new Set();
     this.score = 0;
-    this.combo = 0;
-    this.comboTimer = 0;
     this.kills = 0;
+    this.level = 1;
+    this.xp = 0;
+    this.xpNeeded = xpForLevel(1);
     this.runTime = 0;
     this.deepest = 0;
     this.visited = new Set([startRoom.floor]);
+    this.floorTime = 0;
     this.shake = 0;
     this.damageFlash = 0;
     this.hitmarkTimer = 0;
-    this.pulseCooldown = 0;
+    this.surgeCooldown = 0;
     this.blastCooldown = 0;
     this.bossAwake = false;
     this.bossDead = false;
-    for (const door of this.compiled.doors) door.open = false;
-    for (const prop of this.dungeon.props) prop.taken = false;
+    this.bossState = null;
+    this.compass = null;
+    this.pendingCards = null;
+    this.orbits = [];
+    this.muzzle = null;
+    this.combo = 0;
+    this.comboTimer = 0;
+    this.bestCombo = 0;
+    this.setQuota(startRoom.floor);
 
-    this.refreshOverlay();
+    this.renderer.setOverlay([]);
     this.audio.setDepth(0);
     this.audio.setBoss(false);
     this.state = 'playing';
@@ -158,14 +174,34 @@ export class Game {
     this.el.pause.classList.add('hidden');
     this.el.mapwrap.classList.remove('hidden');
     this.hud.clearMessages();
-    this.banner(`DEPTH 1 - ${DEPTH_NAMES[0].toUpperCase()}`, 'FIND THE WAY DOWN. SOMETHING IS ALREADY AWAKE.');
+    this.banner(`DEPTH 1 - ${DEPTH_NAMES[0].toUpperCase()}`, 'THEY ARE ALREADY MOVING');
     this.el.canvas.requestPointerLock?.();
   }
 
-  refreshOverlay() {
-    const boxes = [];
-    for (const door of this.compiled.doors) if (!door.open) boxes.push(door.box);
-    this.renderer.setOverlay(boxes);
+  /** Everyone starts with a rolled weapon, so run one is already unique. */
+  startingWeapon() {
+    const weapon = generateWeapon(this.rng, 0);
+    weapon.coreKey = this.rng.pick(['bolt', 'scatter', 'seeker']);
+    weapon.rarity = { name: 'Common', tier: 0, mult: 1, weight: 1, colour: 'stone' };
+    weapon.level = 1;
+    recomputeWeapon(weapon);
+    return weapon;
+  }
+
+  setQuota(depth) {
+    const isBossFloor = depth === this.dungeon.floorCount - 1;
+    this.quota = {
+      need: isBossFloor ? 0 : 34 + depth * 22,
+      done: 0,
+      boss: isBossFloor,
+    };
+    this.riftOpen = isBossFloor;
+    this.floorTime = 0;
+  }
+
+  syncResolution() {
+    this.renderer.resize();
+    this.hud.resize(this.renderer.canvas.width, this.renderer.canvas.height);
   }
 
   /* ------------------------------- input ------------------------------- */
@@ -189,21 +225,19 @@ export class Game {
     mute.onclick = () => {
       this.muted = !this.muted;
       this.audio.setMuted(this.muted);
-      mute.textContent = this.muted ? 'Sound: off' : 'Sound: on';
+      mute.textContent = this.muted ? 'SOUND OFF' : 'SOUND ON';
     };
 
     this.el.canvas.addEventListener('mousedown', (e) => {
+      if (this.state === 'levelup') { this.chooseCard(0); return; }
       if (this.state !== 'playing') return;
-      if (document.pointerLockElement !== this.el.canvas) {
-        this.el.canvas.requestPointerLock?.();
-        return;
-      }
-      if (e.button === 0) this.firing = true;
+      if (document.pointerLockElement !== this.el.canvas) { this.el.canvas.requestPointerLock?.(); return; }
+      if (e.button === 0) this.surging = true;
       if (e.button === 2) { this.blasting = true; e.preventDefault(); }
     });
     this.el.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     window.addEventListener('mouseup', (e) => {
-      if (e.button === 0) this.firing = false;
+      if (e.button === 0) this.surging = false;
       if (e.button === 2) this.blasting = false;
     });
 
@@ -211,23 +245,28 @@ export class Game {
       this.pointerLocked = document.pointerLockElement === this.el.canvas;
       if (!this.pointerLocked) {
         this.keys.clear();
-        this.firing = false;
+        this.surging = false;
         this.blasting = false;
         if (this.state === 'playing') this.setPaused(true);
       }
     });
 
     window.addEventListener('mousemove', (e) => {
-      if (this.state !== 'playing' || !this.pointerLocked) return;
+      if (!this.player || !this.pointerLocked) return;
+      if (this.state !== 'playing' && this.state !== 'levelup') return;
       this.player.yaw += e.movementX * this.sensitivity;
       if (this.player.yaw > Math.PI) this.player.yaw -= Math.PI * 2;
       else if (this.player.yaw < -Math.PI) this.player.yaw += Math.PI * 2;
-      const sign = this.invertY ? 1 : -1;
-      this.player.pitch = Math.max(-1.25, Math.min(1.25, this.player.pitch + e.movementY * this.sensitivity * 0.9 * sign));
+      this.player.pitch = Math.max(-1.25, Math.min(1.25, this.player.pitch - e.movementY * this.sensitivity * 0.9));
     });
 
     window.addEventListener('keydown', (e) => {
       if (['INPUT', 'TEXTAREA'].includes(e.target?.tagName) && !this.pointerLocked) return;
+      if (this.state === 'levelup') {
+        const index = ['Digit1', 'Digit2', 'Digit3'].indexOf(e.code);
+        if (index >= 0) { this.chooseCard(index); e.preventDefault(); }
+        return;
+      }
       if (e.code === 'Escape') { if (this.state === 'playing') this.setPaused(true); return; }
       if (e.code === 'KeyR' && (this.state === 'dead' || this.state === 'victory')) { this.startRun(this.seed); return; }
       if (e.code === 'Enter' && this.state === 'title') { document.getElementById('startBtn').click(); return; }
@@ -240,7 +279,7 @@ export class Game {
       if (e.code === 'Space') this.blasting = false;
     });
 
-    window.addEventListener('blur', () => { this.keys.clear(); this.firing = false; this.blasting = false; });
+    window.addEventListener('blur', () => { this.keys.clear(); this.surging = false; this.blasting = false; });
   }
 
   setPaused(on) {
@@ -269,20 +308,73 @@ export class Game {
     this.audio.setBoss(false);
   }
 
-  /* ------------------------------ feedback ----------------------------- */
+  banner(title, sub) { this.hud.banner(title, sub); }
+  toast(text, tone = '') { this.hud.toast(text, tone); }
 
-  banner(title, sub) {
-    this.hud.banner(title, sub);
+  /* ------------------------------ levelling ---------------------------- */
+
+  /**
+   * Kills inside the streak window multiply score and essence. It costs nothing
+   * to implement and it is the single thing that makes a player push one room
+   * further instead of retreating: the meter is only ever falling.
+   */
+  comboWindow() { return Math.max(1.05, 2.2 - this.combo * 0.012); }
+
+  comboScoreMult() { return 1 + Math.min(1.6, this.combo * 0.014); }
+
+  comboEssenceMult() { return 1 + Math.min(0.8, this.combo * 0.007); }
+
+  bumpCombo() {
+    this.combo += 1;
+    this.comboTimer = this.comboWindow();
+    this.bestCombo = Math.max(this.bestCombo, this.combo);
+    // Milestones are the only place the streak makes a noise of its own.
+    if (this.combo % 10 === 0) {
+      this.audio.play('levelUp', { pitch: 1.25 + Math.min(0.6, this.combo * 0.008), gain: 0.5, force: true });
+      this.toast(`${this.combo} CHAIN`, 'good');
+    }
   }
 
-  toast(text, tone = '') {
-    this.hud.toast(text, tone);
+  gainEssence(value) {
+    const gained = Math.max(1, Math.round(value * (1 + this.loadout.stats.xpGain) * this.comboEssenceMult()));
+    this.xp += gained;
+    this.score += Math.round(gained * 2 * this.comboScoreMult());
+    this.audio.play('essence', { pitch: 0.9 + Math.random() * 0.5, spacing: 0.02 });
+    while (this.xp >= this.xpNeeded && !this.pendingCards) this.levelUp();
   }
 
-  /** Keep the HUD canvas at exactly the renderer's pixel grid. */
-  syncResolution() {
-    this.renderer.resize();
-    this.hud.resize(this.renderer.canvas.width, this.renderer.canvas.height);
+  levelUp() {
+    this.xp -= this.xpNeeded;
+    this.level += 1;
+    this.xpNeeded = xpForLevel(this.level);
+    // A share of what is missing, not a flat top-up. Near death a level is a
+    // genuine rescue; at full hull it is worth nothing. A flat heal did the
+    // opposite - levels arrive fastest when you are killing well, so the flat
+    // version pinned a strong build at maximum hull and the fight stopped
+    // being able to threaten it at all.
+    this.player.hull += (this.maxHull() - this.player.hull) * 0.25;
+    this.pendingCards = this.loadout.offer(this.deepest);
+    this.state = 'levelup';
+    this.shake = Math.max(this.shake, 0.12);
+    this.audio.play('levelUp', { force: true });
+    this.audio.setIntensity(0.2);
+  }
+
+  chooseCard(index) {
+    if (!this.pendingCards) return;
+    const card = this.pendingCards[Math.max(0, Math.min(this.pendingCards.length - 1, index))];
+    if (!card) return;
+    this.loadout.take(card);
+    this.player.hull = Math.min(this.maxHull(), this.player.hull);
+    this.pendingCards = null;
+    this.state = 'playing';
+    this.audio.play('choose', { force: true });
+    this.toast(`${card.title.toUpperCase()}`, 'good');
+    if (!this.pointerLocked) this.el.canvas.requestPointerLock?.();
+  }
+
+  maxHull() {
+    return PLAYER.maxHull + this.loadout.stats.maxHull;
   }
 
   /* ------------------------------- combat ------------------------------ */
@@ -296,183 +388,210 @@ export class Game {
     return [this.player.x, this.player.y + this.player.eye, this.player.z];
   }
 
-  firePulse() {
-    if (this.pulseCooldown > 0 || this.player.energy < PULSE.cost) {
-      if (this.player.energy < PULSE.cost) this.hint('Out of charge');
-      return;
-    }
-    this.player.energy -= PULSE.cost;
-    this.player.regenHold = PLAYER.regenDelay;
-    this.pulseCooldown = PULSE.cooldown;
-    this.shake = Math.max(this.shake, 0.035);
-    this.audio.play('shoot');
-
-    const origin = this.eyePoint();
-    const dir = this.viewDirection();
-    const hit = this.swarm.raycast(origin, dir, PULSE.range);
-    const end = hit
-      ? [origin[0] + dir[0] * hit.distance, origin[1] + dir[1] * hit.distance, origin[2] + dir[2] * hit.distance]
-      : [origin[0] + dir[0] * PULSE.range, origin[1] + dir[1] * PULSE.range, origin[2] + dir[2] * PULSE.range];
-
-    this.recoil = Math.min(1, (this.recoil || 0) + 0.55);
-    this.muzzleWeapon = 0.05;
-    this.muzzle = { pos: [origin[0] + dir[0] * 0.6, origin[1] + dir[1] * 0.6, origin[2] + dir[2] * 0.6], life: 0.06 };
-
-    if (hit && this.physics.rayClear(origin, end)) {
-      this.swarm.hurt(hit.enemy, PULSE.damage, [dir[0], dir[2]], (e) => this.onKill(e));
-      this.swarm.burst(end[0], end[1], end[2], [1, 0.85, 0.5], 4);
-      this.hitmarkTimer = 0.12;
-      this.audio.play('hitEnemy');
-    } else {
-      // Trace to the wall so the shot visibly lands somewhere.
-      let stop = end;
-      for (let t = 0.5; t <= PULSE.range; t += 0.5) {
-        const point = [origin[0] + dir[0] * t, origin[1] + dir[1] * t, origin[2] + dir[2] * t];
-        if (!this.physics.rayClear(origin, point)) { stop = point; break; }
-      }
-      this.swarm.burst(stop[0], stop[1], stop[2], [0.75, 0.8, 0.9], 3);
-      this.audio.play('hitWall');
-    }
-  }
-
-  fireBlast() {
-    if (this.blastCooldown > 0) return;
-    if (this.player.energy < BLAST.cost) { this.hint('Not enough charge for a blast'); return; }
-    this.player.energy -= BLAST.cost;
-    this.player.regenHold = PLAYER.regenDelay * 2;
-    this.blastCooldown = BLAST.cooldown;
-    this.shake = Math.max(this.shake, 0.11);
-    this.audio.play('blast');
-
-    const origin = this.eyePoint();
-    const dir = this.viewDirection();
-    const hit = this.swarm.raycast(origin, dir, BLAST.range);
-    let centre = [origin[0] + dir[0] * BLAST.range, origin[1] + dir[1] * BLAST.range, origin[2] + dir[2] * BLAST.range];
-    if (hit && this.physics.rayClear(origin, [hit.enemy.x, hit.enemy.y + 0.8, hit.enemy.z])) {
-      centre = [hit.enemy.x, hit.enemy.y + hit.enemy.type.height * 0.5, hit.enemy.z];
-      this.swarm.hurt(hit.enemy, BLAST.damage, [dir[0], dir[2]], (e) => this.onKill(e));
-      this.hitmarkTimer = 0.16;
-    } else {
-      for (let t = 1; t <= BLAST.range; t += 0.5) {
-        const point = [origin[0] + dir[0] * t, origin[1] + dir[1] * t, origin[2] + dir[2] * t];
-        if (!this.physics.rayClear(origin, point)) { centre = point; break; }
-      }
-    }
-    // Splash: everything close to the impact takes a share and gets shoved.
-    for (const enemy of [...this.swarm.enemies]) {
-      if (enemy.hp <= 0) continue;
-      const d = Math.hypot(enemy.x - centre[0], enemy.z - centre[2], (enemy.y + 0.8) - centre[1]);
-      if (d > BLAST.radius) continue;
-      const falloff = 1 - d / BLAST.radius;
-      const push = [enemy.x - centre[0], enemy.z - centre[2]];
-      const len = Math.hypot(push[0], push[1]) || 1;
-      this.swarm.hurt(enemy, BLAST.splash * falloff, [push[0] / len, push[1] / len], (e) => this.onKill(e));
-    }
-    this.swarm.burst(centre[0], centre[1], centre[2], [1, 0.7, 0.35], 26);
-    this.recoil = 1;
-    this.muzzle = { pos: centre, life: 0.16, big: true };
-    this.muzzleWeapon = 0.1;
-  }
-
-  /**
-   * The weapon in your hands. Drawn as world-space boxes pinned to the camera,
-   * with sway and recoil - it is most of what makes shooting feel like shooting.
-   */
-  viewModelBoxes() {
-    const yaw = this.player.yaw;
-    const pitch = this.player.pitch;
-    const cp = Math.cos(pitch);
-    const forward = [Math.sin(yaw) * cp, Math.sin(pitch), -Math.cos(yaw) * cp];
-    const right = [Math.cos(yaw), 0, Math.sin(yaw)];
-    const up = [
-      right[1] * forward[2] - right[2] * forward[1],
-      right[2] * forward[0] - right[0] * forward[2],
-      right[0] * forward[1] - right[1] * forward[0],
-    ];
-    const basis = [right, up, forward];
-    const eye = this.eyePoint();
-    const recoil = this.recoil || 0;
-    const bob = this.walkBob || 0;
-    const sway = Math.sin(bob) * 0.008;
-    const heave = Math.abs(Math.cos(bob)) * 0.007;
-
-    const at = (f, r, u) => [
-      eye[0] + forward[0] * f + right[0] * r + up[0] * u,
-      eye[1] + forward[1] * f + right[1] * r + up[1] * u,
-      eye[2] + forward[2] * f + right[2] * r + up[2] * u,
-    ];
-    /** Half-extents are given in weapon space: (right, up, forward). */
-    const part = (f, r, u, hr, hu, hf, colour, emissive) => {
-      const p = at(f, r, u);
-      const box = new Box(p[0], p[1], p[2], hr, hu, hf, colour, 'weapon', emissive || 0);
-      box.basis = basis;
-      return box;
+  combatHooks() {
+    if (this._hooks) return this._hooks;
+    this._hooks = {
+      pickupBonus: 0,
+      onPlayerHit: (amount) => this.hurtPlayer(amount),
+      onWindup: (e) => this.audio.play('windup', { pitch: 0.85 + Math.random() * 0.3, spacing: 0.09 }),
+      onEnemyShoot: () => this.audio.play('shoot', { pitch: 0.7, spacing: 0.06 }),
+      onNotice: () => this.audio.play('notice', { pitch: 0.9 + Math.random() * 0.25, spacing: 0.18 }),
+      onBossWake: () => {},
+      onProjectileWall: (p) => {
+        this.audio.play('hitWall', { pitch: 0.85 + Math.random() * 0.4, spacing: 0.04 });
+        this.addFlash([p.x, p.y, p.z], p.colour, 1.1, 0.06);
+      },
+      onFire: (weapon, origin) => {
+        const s = weapon.stats;
+        this.audio.play('shoot', { pitch: 0.75 + Math.random() * 0.6, gain: 0.9, spacing: 0.025 });
+        this.recoil = Math.min(1, (this.recoil || 0) + 0.3);
+        this.muzzleWeapon = 0.05;
+        this.shake = Math.max(this.shake, 0.012 + s.damage * 0.0004);
+        this.addFlash(origin, s.trail, 1.8, 0.05);
+      },
+      onHit: (p, enemy, isCrit, killed) => {
+        this.hitmarkTimer = isCrit ? 0.16 : 0.09;
+        this.audio.play(isCrit ? 'crit' : (p.weapon ? p.weapon.sfx : 'hitEnemy'), {
+          pitch: 0.85 + Math.random() * 0.45, spacing: 0.03,
+        });
+        this.addFlash([p.x, p.y, p.z], p.weapon ? p.weapon.trail : p.colour, isCrit ? 2.6 : 1.4, 0.07);
+        if (p.weapon && p.weapon.lifesteal > 0 && !killed) {
+          this.player.hull = Math.min(this.maxHull(), this.player.hull + p.damage * p.weapon.lifesteal);
+        }
+        const steal = this.loadout.stats.lifesteal;
+        if (steal > 0) this.player.hull = Math.min(this.maxHull(), this.player.hull + p.damage * steal);
+      },
+      onBlast: (p, radius) => {
+        this.audio.play('explode', { pitch: 0.8 + Math.random() * 0.35, spacing: 0.05 });
+        this.addFlash([p.x, p.y, p.z], p.weapon ? p.weapon.trail : p.colour, 5.5, 0.16);
+        const d = Math.hypot(p.x - this.player.x, p.z - this.player.z);
+        this.shake = Math.max(this.shake, Math.max(0, 0.16 - d * 0.01) + radius * 0.008);
+      },
+      onChain: () => this.audio.play('hitArc', { pitch: 1.1 + Math.random() * 0.4, spacing: 0.04 }),
+      onKill: (enemy) => this.onKill(enemy),
+      onEssence: (value) => this.gainEssence(value),
+      onPickup: (item) => {
+        if (item.kind === 'health') {
+          if (this.player.hull >= this.maxHull()) return false;
+          this.player.hull = Math.min(this.maxHull(), this.player.hull + item.amount);
+        } else {
+          if (this.player.charge >= PLAYER.maxCharge) return false;
+          this.player.charge = Math.min(PLAYER.maxCharge, this.player.charge + item.amount);
+        }
+        this.audio.play('pickup', { pitch: 0.95 + Math.random() * 0.3 });
+        return true;
+      },
     };
+    return this._hooks;
+  }
 
-    const depth = 0.60 - recoil * 0.06;
-    const side = 0.155 + sway;
-    const drop = -0.150 - heave + recoil * 0.022;
-    const boxes = [];
+  /** Short-lived point light. This is what welds a sound to a visible event. */
+  addFlash(pos, colour, intensity, life) {
+    if (!this.flashes) this.flashes = [];
+    if (this.flashes.length > 14) this.flashes.shift();
+    this.flashes.push({ pos: [pos[0], pos[1], pos[2]], colour, intensity, life, maxLife: life });
+  }
 
-    // Receiver, barrel, sight and grip. Long and thin reads as a weapon; a
-    // chunky box reads as a crate you are carrying.
-    boxes.push(part(depth, side, drop, 0.016, 0.019, 0.080, [0.27, 0.30, 0.35], 0.04));
-    boxes.push(part(depth + 0.105, side, drop + 0.004, 0.008, 0.008, 0.055, [0.15, 0.17, 0.20], 0.02));
-    boxes.push(part(depth + 0.02, side, drop + 0.026, 0.005, 0.010, 0.012, [0.20, 0.22, 0.26], 0));
-    boxes.push(part(depth - 0.055, side, drop - 0.042, 0.011, 0.030, 0.014, [0.20, 0.16, 0.13], 0));
-    // The charge cell runs along the receiver, so ammo is readable in the corner
-    // of your eye without looking at the bar.
-    const level = this.player.energy / PLAYER.maxEnergy;
-    boxes.push(part(depth - 0.012, side - 0.017, drop + 0.006, 0.004, 0.008, 0.052 * Math.max(0.1, level),
-      level > 0.25 ? [0.35, 0.85, 1.0] : [1.0, 0.4, 0.35], 1.0));
-    if ((this.muzzleWeapon || 0) > 0) {
-      const size = 0.026 + (this.muzzle && this.muzzle.big ? 0.026 : 0);
-      boxes.push(part(depth + 0.18, side, drop + 0.004, size, size, size * 1.6, [1, 0.88, 0.6], 1.0));
+  /** Every weapon that is off cooldown, fired where you are looking. */
+  autoFire(dt, floorIndex) {
+    const haste = 1 + this.loadout.stats.haste;
+    const bonus = {
+      damage: this.loadout.stats.damage,
+      area: this.loadout.stats.area,
+      crit: this.loadout.stats.crit,
+    };
+    const origin = this.eyePoint();
+    const forward = this.viewDirection();
+    for (const weapon of this.loadout.weapons) {
+      if (weapon.stats.aim === 'orbit') continue;
+      weapon.cooldownLeft -= dt * haste;
+      if (weapon.cooldownLeft > 0) continue;
+      weapon.cooldownLeft += Math.max(0.08, weapon.stats.cooldown);
+      this.swarm.fireWeapon(weapon, origin, forward, floorIndex, bonus, this.combatHooks());
     }
-    return boxes;
+  }
+
+  /** Orbit weapons are not fired; they are simply always there, and always hurt. */
+  updateOrbits(dt, floorIndex) {
+    this.orbits.length = 0;
+    const bonus = 1 + this.loadout.stats.area;
+    const hooks = this.combatHooks();
+    for (const weapon of this.loadout.weapons) {
+      const s = weapon.stats;
+      if (s.aim !== 'orbit') continue;
+      weapon.orbitPhase += dt * (s.speed * (1 + this.loadout.stats.haste));
+      if (!weapon.hitClock) weapon.hitClock = new Map();
+      const radius = 2.1 * bonus;
+      for (let i = 0; i < s.count; i += 1) {
+        const angle = weapon.orbitPhase + (i / s.count) * Math.PI * 2;
+        const x = this.player.x + Math.cos(angle) * radius;
+        const z = this.player.z + Math.sin(angle) * radius;
+        const y = this.player.y + 1.0;
+        this.orbits.push({ x, y, z, size: s.size * bonus, colour: s.trail });
+        for (const enemy of this.swarm.nearby(x, z, [])) {
+          if (enemy.hp <= 0 || enemy.floor !== floorIndex) continue;
+          const reach = enemy.type.radius * enemy.scale + s.size * bonus + 0.2;
+          if (Math.hypot(enemy.x - x, enemy.z - z) > reach) continue;
+          const last = weapon.hitClock.get(enemy.id) || -1;
+          if (this.swarm.clock - last < 0.42) continue;
+          weapon.hitClock.set(enemy.id, this.swarm.clock);
+          const dir = [enemy.x - this.player.x, enemy.z - this.player.z];
+          const len = Math.hypot(dir[0], dir[1]) || 1;
+          const damage = s.damage * (1 + this.loadout.stats.damage);
+          this.swarm.applyImpact({ x, y, z, damage, weapon: s, colour: s.colour }, enemy, hooks);
+          this.swarm.hurt(enemy, damage, [dir[0] / len, dir[1] / len], hooks);
+          this.swarm.burst(x, y, z, s.trail, 3);
+          this.audio.play(s.sfx, { pitch: 0.9 + Math.random() * 0.4, spacing: 0.05 });
+        }
+      }
+    }
+  }
+
+  fireSurge(floorIndex) {
+    if (this.surgeCooldown > 0 || this.player.charge < SURGE.cost) return;
+    this.player.charge -= SURGE.cost;
+    this.player.regenHold = 0.4;
+    this.surgeCooldown = SURGE.cooldown;
+    for (const weapon of this.loadout.weapons) weapon.cooldownLeft = 0;
+    this.autoFire(0, floorIndex);
+    this.shake = Math.max(this.shake, 0.1);
+    this.audio.play('surge', { force: true });
+  }
+
+  fireBlast(floorIndex) {
+    if (this.blastCooldown > 0 || this.player.charge < BLAST.cost) return;
+    this.player.charge -= BLAST.cost;
+    this.player.regenHold = 0.6;
+    this.blastCooldown = BLAST.cooldown;
+    this.shake = Math.max(this.shake, 0.24);
+    this.audio.play('blast', { force: true });
+
+    const centre = [this.player.x, this.player.y + 1.0, this.player.z];
+    const radius = BLAST.radius * (1 + this.loadout.stats.area);
+    const hooks = this.combatHooks();
+    const damage = BLAST.damage * (1 + this.loadout.stats.damage);
+    for (const enemy of [...this.swarm.enemies]) {
+      if (enemy.hp <= 0 || enemy.floor !== floorIndex) continue;
+      const d = Math.hypot(enemy.x - centre[0], enemy.z - centre[2]);
+      if (d > radius) continue;
+      const push = [(enemy.x - centre[0]) / (d || 1), (enemy.z - centre[2]) / (d || 1)];
+      // Knock hard: the blast is a panic button, so it has to buy space.
+      for (let i = 0; i < 5; i += 1) {
+        this.physics.move(enemy, push[0] * 0.22, push[1] * 0.22, enemy.type.radius, enemy.type.height);
+      }
+      this.swarm.hurt(enemy, damage * (1 - (d / radius) * 0.55), push, hooks);
+    }
+    this.swarm.burst(centre[0], centre[1], centre[2], rgb('ice', 4), 42);
+    this.addFlash(centre, rgb('ice', 4), 7, 0.22);
   }
 
   onKill(enemy) {
     this.kills += 1;
-    this.combo += 1;
-    this.comboTimer = COMBO_WINDOW;
-    const multiplier = this.comboMultiplier();
-    const gained = Math.round(enemy.type.score * multiplier);
-    this.score += gained;
-    this.audio.play('enemyDie');
-    this.toast(`${enemy.type.name} +${gained}${multiplier > 1 ? ` ×${multiplier}` : ''}`, multiplier > 2 ? 'hot' : '');
-    this.shake = Math.max(this.shake, enemy.type.boss ? 0.4 : 0.05);
+    this.bumpCombo();
+    this.score += Math.round(enemy.type.score * this.comboScoreMult());
+    if (!this.quota.boss && !this.riftOpen) {
+      this.quota.done += 1;
+      if (this.quota.done >= this.quota.need) this.openRift();
+    }
+    // The death note climbs with the streak, so the horde audibly rewards greed.
+    this.audio.play('enemyDie', {
+      pitch: 0.8 + Math.min(0.7, this.combo * 0.012) + Math.random() * 0.3, spacing: 0.04,
+    });
+    this.shake = Math.max(this.shake, enemy.type.boss ? 0.4 : 0.03);
     if (enemy.type.boss) this.onVictory();
   }
 
-  comboMultiplier() {
-    return Math.min(5, 1 + Math.floor(this.combo / 3));
-  }
-
-  hint(text) {
-    if (this.hintTimer > 0) return;
-    this.hintTimer = 1.2;
-    this.toast(text, 'warn');
+  openRift() {
+    this.riftOpen = true;
+    this.audio.play('riftOpen', { force: true });
+    this.banner('THE WAY DOWN OPENS', 'LEAVE, OR STAY AND GROW STRONGER');
+    this.shake = Math.max(this.shake, 0.2);
   }
 
   hurtPlayer(amount) {
     if (this.player.invuln > 0 || this.state !== 'playing') return;
-    this.player.hp -= amount;
+    const reduced = amount * Math.max(0.25, 1 - this.loadout.stats.armour);
+    this.player.hull -= reduced;
+    // Half the chain, not all of it. A full reset would mean the meter never
+    // climbs at depth-four density; keeping none of it would mean the meter
+    // costs nothing. Half is a loss you can feel and still fight back from.
+    if (this.combo > 1) {
+      this.combo = Math.floor(this.combo / 2);
+      this.comboTimer = this.comboWindow();
+    }
     this.player.invuln = PLAYER.invulnAfterHit;
     this.damageFlash = 1;
-    this.shake = Math.max(this.shake, 0.16);
-    this.combo = 0;
-    this.comboTimer = 0;
-    this.audio.play('playerHurt');
-    if (this.player.hp <= 0) {
-      this.player.hp = 0;
+    this.shake = Math.max(this.shake, 0.18);
+    this.audio.play('playerHurt', { force: true });
+    if (this.player.hull <= 0) {
+      this.player.hull = 0;
       this.onDeath();
     }
   }
 
   onDeath() {
     this.state = 'dead';
-    this.audio.play('death');
+    this.audio.play('death', { force: true });
     this.audio.setIntensity(0);
     this.audio.setBoss(false);
     this.recordBest();
@@ -487,13 +606,12 @@ export class Game {
     if (this.state === 'victory') return;
     this.bossDead = true;
     this.state = 'victory';
-    this.score += 5000 + Math.max(0, 4000 - Math.round(this.runTime * 10));
-    this.audio.play('victory');
+    this.score += 6000 + Math.max(0, 5000 - Math.round(this.runTime * 12));
+    this.audio.play('victory', { force: true });
     this.audio.setIntensity(0);
     this.audio.setBoss(false);
     this.recordBest();
     document.exitPointerLock?.();
-    this.bossState = null;
     this.el.overTitle.textContent = 'THE WARDEN FALLS';
     this.el.overTitle.className = 'overTitle good';
     this.el.overStats.innerHTML = this.runSummary();
@@ -504,13 +622,17 @@ export class Game {
     const minutes = Math.floor(this.runTime / 60);
     const seconds = Math.floor(this.runTime % 60).toString().padStart(2, '0');
     const pad = (n) => String(Math.max(0, Math.round(n))).padStart(6, '0');
+    const build = this.loadout.weapons.map((w) => `${w.name} L${w.level}`).join(' / ') || 'NONE';
     return `
       <div class="statRow"><span>SCORE</span><b>${pad(this.score)}</b></div>
+      <div class="statRow"><span>LEVEL</span><b>${this.level}</b></div>
       <div class="statRow"><span>KILLS</span><b>${this.kills}</b></div>
+      <div class="statRow"><span>BEST CHAIN</span><b>${this.bestCombo}</b></div>
       <div class="statRow"><span>DEEPEST</span><b>DEPTH ${this.deepest + 1}</b></div>
       <div class="statRow"><span>TIME</span><b>${minutes}:${seconds}</b></div>
       <div class="statRow"><span>SEED</span><b>${this.seed}</b></div>
-      <div class="statRow best"><span>BEST</span><b>${pad(Math.max(this.best, this.score))}</b></div>`;
+      <div class="statRow best"><span>BEST</span><b>${pad(Math.max(this.best, this.score))}</b></div>
+      <div class="buildLine">${build.toUpperCase()}</div>`;
   }
 
   /* ------------------------------- update ------------------------------ */
@@ -531,7 +653,8 @@ export class Game {
     const rx = Math.cos(this.player.yaw);
     const rz = Math.sin(this.player.yaw);
     const running = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
-    const speed = running ? PLAYER.runSpeed : PLAYER.walkSpeed;
+    const base = running ? PLAYER.runSpeed : PLAYER.walkSpeed;
+    const speed = base * (1 + this.loadout.stats.moveSpeed);
     this.walkBob = (this.walkBob || 0) + dt * (running ? 13 : 8.5);
     this.physics.move(
       this.player,
@@ -540,60 +663,35 @@ export class Game {
     );
   }
 
-  updateInteractions(floorIndex) {
-    let changed = false;
-    for (const prop of this.dungeon.props) {
-      if (prop.kind !== 'key' || prop.taken || prop.floor !== floorIndex) continue;
-      if (Math.hypot(prop.x - this.player.x, prop.z - this.player.z) > 1.2) continue;
-      prop.taken = true;
-      this.held.add(prop.lockId);
-      const lock = this.dungeon.locks.find((l) => l.id === prop.lockId);
-      this.audio.play('key');
-      this.toast(`${lock ? lock.name : 'A'} key acquired`, 'good');
-      changed = true;
-    }
-    for (const door of this.compiled.doors) {
-      if (door.open || !this.held.has(door.lock.id)) continue;
-      door.open = true;
-      this.audio.play('door');
-      this.toast(`${door.lock.name} door opens`, 'good');
-      changed = true;
-    }
-    if (changed) this.refreshOverlay();
-  }
-
   updateDepth(floorIndex) {
     if (this.visited.has(floorIndex)) return;
     this.visited.add(floorIndex);
     this.deepest = Math.max(this.deepest, floorIndex);
     this.audio.setDepth(floorIndex);
-    this.audio.play('descend');
-    const heal = 25;
-    this.player.hp = Math.min(PLAYER.maxHp, this.player.hp + heal);
-    this.player.energy = PLAYER.maxEnergy;
-    this.score += 750;
+    this.audio.play('descend', { force: true });
+    this.player.hull = Math.min(this.maxHull(), this.player.hull + 30);
+    this.player.charge = PLAYER.maxCharge;
+    this.score += 1200;
+    this.setQuota(floorIndex);
     const name = DEPTH_NAMES[floorIndex] || `Depth ${floorIndex + 1}`;
     const last = floorIndex === this.dungeon.floorCount - 1;
-    this.banner(
-      `DEPTH ${floorIndex + 1} - ${name.toUpperCase()}`,
-      last ? 'THE WARDEN IS HERE. KILL IT.' : 'DEEPER. LOUDER. KEEP MOVING.',
-    );
+    this.banner(`DEPTH ${floorIndex + 1} - ${name.toUpperCase()}`,
+      last ? 'THE WARDEN IS HERE. KILL IT.' : 'DEEPER. FASTER. KILL MORE.');
   }
 
-  /** A chevron pointing at the nearest way down, so nobody wanders lost. */
   updateCompass(floorIndex) {
     const plan = this.dungeon.floors[floorIndex];
     let target = null;
-    if (!this.bossAwake) {
+    if (this.riftOpen && !this.quota.boss) {
       for (const stair of this.dungeon.stairs) {
         if (stair.upperFloor !== floorIndex) continue;
         const world = plan.worldOf(stair.exit[0], stair.exit[1]);
         const d = Math.hypot(world[0] - this.player.x, world[2] - this.player.z);
-        if (!target || d < target.d) target = { d, x: world[0], z: world[2], label: 'DOWN' };
+        if (!target || d < target.d) target = { d, x: world[0], z: world[2], label: 'DESCEND' };
       }
     }
     const goal = this.dungeon.roomsById.get(this.dungeon.goal);
-    if (!target && goal && goal.floor === floorIndex) {
+    if (!target && goal && goal.floor === floorIndex && !this.bossDead) {
       const world = this.dungeon.floors[goal.floor].worldOf(goal.cx, goal.cz);
       target = {
         d: Math.hypot(world[0] - this.player.x, world[2] - this.player.z),
@@ -623,72 +721,88 @@ export class Game {
       boss.dormant = false;
       boss.aggro = true;
       boss.state = 'chase';
-      this.audio.play('bossRoar');
+      // Scale the Warden to whatever walked into the room.
+      //
+      // Builds arriving here range from a level-eight scrape to a level-thirty
+      // engine of destruction, and a fixed pool cannot serve both: the same
+      // 1500 hit points that are a wall for one are two and a half seconds for
+      // the other. The run's last fight has to be the run's hardest fight, so
+      // the Warden is measured against the player rather than against a number
+      // chosen before the run began.
+      boss.maxHp = Math.round(boss.type.hp * (1 + this.level * 0.19));
+      boss.hp = boss.maxHp;
+      this.audio.play('bossRoar', { force: true });
       this.audio.setBoss(true);
-      this.banner('THE WARDEN', 'IT HAS BEEN WAITING FOR YOU');
+      this.banner('THE WARDEN', 'IT HAS BEEN WAITING');
     }
     this.bossState = { name: 'THE WARDEN', ratio: Math.max(0, boss.hp / boss.maxHp) };
   }
 
   updateHud(floorIndex, dt) {
-    const owed = this.dungeon.locks.filter((l) => !this.held.has(l.id));
     const remaining = this.swarm.aliveOnFloor(floorIndex);
     let objective;
-    if (this.bossAwake && !this.bossDead) objective = 'DESTROY THE WARDEN';
-    else if (owed.length) objective = `FIND THE ${owed[0].name} KEY - ${remaining} HOSTILE${remaining === 1 ? '' : 'S'}`;
-    else objective = `DESCEND - ${remaining} HOSTILE${remaining === 1 ? '' : 'S'}`;
+    if (this.quota.boss) objective = this.bossAwake ? 'KILL THE WARDEN' : 'FIND THE WARDEN';
+    else if (this.riftOpen) objective = 'THE WAY DOWN IS OPEN';
+    else objective = `PURGE ${this.quota.need - this.quota.done} MORE`;
 
     this.hud.draw({
-      hp: this.player.hp,
-      maxHp: PLAYER.maxHp,
-      energy: this.player.energy,
-      maxEnergy: PLAYER.maxEnergy,
+      hull: this.player.hull,
+      maxHull: this.maxHull(),
+      charge: this.player.charge,
+      maxCharge: PLAYER.maxCharge,
       score: this.score,
-      combo: this.combo,
-      comboTimer: this.comboTimer,
-      comboWindow: COMBO_WINDOW,
-      multiplier: this.comboMultiplier(),
+      level: this.level,
+      xp: this.xp,
+      xpNeeded: this.xpNeeded,
       depth: floorIndex + 1,
       floors: this.dungeon.floorCount,
       objective,
-      locks: this.dungeon.locks.map((l) => ({
-        name: l.name.toUpperCase(),
-        held: this.held.has(l.id),
-        colour: `rgb(${l.color.map((v) => Math.round(v * 255)).join(',')})`,
+      quota: this.quota,
+      riftOpen: this.riftOpen,
+      hostiles: remaining,
+      weapons: this.loadout.weapons.map((w) => ({
+        name: w.name, level: w.level,
+        colour: `rgb(${w.stats.colour.map((v) => Math.round(v * 255)).join(',')})`,
+        ready: w.cooldownLeft <= 0.05,
       })),
+      relics: this.loadout.relics.length,
       compass: this.compass,
       boss: this.bossState,
       hitmark: this.hitmarkTimer,
+      cards: this.pendingCards,
+      combo: this.combo,
+      comboRatio: this.combo ? Math.max(0, this.comboTimer / this.comboWindow()) : 0,
+      comboMult: this.comboScoreMult(),
     }, dt);
 
     this.el.damage.style.opacity = String(this.damageFlash * 0.55);
-    const low = this.player.hp / PLAYER.maxHp < 0.3 && this.state === 'playing';
+    const low = this.player.hull / this.maxHull() < 0.3 && this.state === 'playing';
     this.el.lowHp.classList.toggle('show', low);
   }
 
   step(dt, floorIndex) {
     this.runTime += dt;
-    this.pulseCooldown = Math.max(0, this.pulseCooldown - dt);
+    this.floorTime += dt;
+    this.surgeCooldown = Math.max(0, this.surgeCooldown - dt);
     this.blastCooldown = Math.max(0, this.blastCooldown - dt);
-    this.hintTimer = Math.max(0, (this.hintTimer || 0) - dt);
     this.player.invuln = Math.max(0, this.player.invuln - dt);
     this.player.regenHold = Math.max(0, this.player.regenHold - dt);
     this.damageFlash = Math.max(0, this.damageFlash - dt * 2.4);
     this.hitmarkTimer = Math.max(0, this.hitmarkTimer - dt);
-    this.shake = Math.max(0, this.shake - dt * 0.6);
-    this.recoil = Math.max(0, (this.recoil || 0) - dt * 5.5);
-    this.muzzleWeapon = Math.max(0, (this.muzzleWeapon || 0) - dt);
+    this.shake = Math.max(0, this.shake - dt * 0.7);
     if (this.comboTimer > 0) {
       this.comboTimer -= dt;
-      if (this.comboTimer <= 0) this.combo = 0;
+      if (this.comboTimer <= 0) { this.combo = 0; this.comboTimer = 0; }
     }
-    if (this.player.regenHold <= 0 && this.player.energy < PLAYER.maxEnergy) {
-      this.player.energy = Math.min(PLAYER.maxEnergy, this.player.energy + PLAYER.energyRegen * dt);
+    this.recoil = Math.max(0, (this.recoil || 0) - dt * 5.5);
+    this.muzzleWeapon = Math.max(0, (this.muzzleWeapon || 0) - dt);
+    if (this.player.regenHold <= 0 && this.player.charge < PLAYER.maxCharge) {
+      this.player.charge = Math.min(PLAYER.maxCharge, this.player.charge + PLAYER.chargeRegen * dt);
     }
     this.updateMovement(dt);
-    if (this.firing) this.firePulse();
-    if (this.blasting) { this.fireBlast(); this.blasting = false; }
-    void floorIndex;
+    this.autoFire(dt, floorIndex);
+    if (this.surging) this.fireSurge(floorIndex);
+    if (this.blasting) { this.fireBlast(floorIndex); this.blasting = false; }
   }
 
   frame(now) {
@@ -707,53 +821,45 @@ export class Game {
       }
       if (steps >= 40) this.accumulator = 0;
 
-      this.swarm.update(raw, this.player, {
-        onPlayerHit: (amount) => this.hurtPlayer(amount),
-        onWindup: () => this.audio.play('windup'),
-        onEnemyShoot: () => this.audio.play('shoot'),
-        onNotice: () => this.audio.play('notice'),
-        onBossWake: () => {},
-        onProjectileWall: () => {},
-        onPickup: (item) => {
-          if (item.kind === 'health') {
-            if (this.player.hp >= PLAYER.maxHp) return false;
-            this.player.hp = Math.min(PLAYER.maxHp, this.player.hp + item.amount);
-          } else {
-            if (this.player.energy >= PLAYER.maxEnergy) return false;
-            this.player.energy = Math.min(PLAYER.maxEnergy, this.player.energy + item.amount);
-          }
-          this.audio.play('pickup');
-          return true;
-        },
-      });
+      const hooks = this.combatHooks();
+      hooks.pickupBonus = this.loadout.stats.pickupRadius;
+      this.swarm.desperation = Math.max(0, 1 - this.player.hull / this.maxHull());
+      this.updateOrbits(raw, floorIndex);
+      this.swarm.update(raw, this.player, hooks);
 
-      this.updateInteractions(floorIndex);
+      // Pressure ramps while you stay, and again once the way down is open, so
+      // farming is always a live risk rather than a free lunch.
+      const intensity = Math.min(1.4, this.floorTime / 110 + (this.riftOpen ? 0.4 : 0));
+      this.swarm.spawnWave(raw, this.player, floorIndex, intensity);
+
       this.updateDepth(floorIndex);
       this.checkBoss(floorIndex);
       this.updateCompass(floorIndex);
-      this.updateHud(floorIndex, raw);
       this.map.observe(floorIndex, this.player.x, this.player.z);
 
-      // Music tracks how much trouble the player is in.
-      const pressure = Math.min(1, this.swarm.aggroCount / 5) * 0.7
-        + (1 - this.player.hp / PLAYER.maxHp) * 0.3;
-      this.audio.setIntensity(this.bossAwake ? Math.max(0.75, pressure) : pressure);
+      const pressure = Math.min(1, this.swarm.aggroCount / 14) * 0.7
+        + (1 - this.player.hull / this.maxHull()) * 0.3;
+      this.audio.setIntensity(this.bossAwake ? Math.max(0.8, pressure) : pressure);
     }
 
     if (this.dungeon) {
       const floorIndex = this.physics.floorAt(this.player.y);
-      const dynamic = this.state === 'playing' ? this.viewModelBoxes() : [];
-      this.renderer.setSprites(this.swarm.spriteList());
-      if (this.muzzle) {
-        this.muzzle.life -= raw;
-        if (this.muzzle.life <= 0) this.muzzle = null;
-      }
-      this.renderer.shake = this.shake;
-      this.renderer.setDynamic(dynamic);
+      this.updateHud(floorIndex, raw);
+
+      // Flashes decay here so they live exactly as long on screen as in the ear.
       const lights = this.swarm.lights();
-      if (this.muzzle) {
-        lights.push({ pos: this.muzzle.pos, colour: [1, 0.85, 0.55], intensity: this.muzzle.big ? 4 : 2 });
+      if (this.flashes) {
+        for (const f of this.flashes) f.life -= raw;
+        this.flashes = this.flashes.filter((f) => f.life > 0);
+        for (const f of this.flashes) {
+          lights.push({ pos: f.pos, colour: f.colour, intensity: f.intensity * (f.life / f.maxLife) });
+        }
       }
+      for (const o of this.orbits) lights.push({ pos: [o.x, o.y, o.z], colour: o.colour, intensity: 0.7 });
+
+      this.renderer.shake = this.shake;
+      this.renderer.setDynamic(this.state === 'playing' || this.state === 'levelup' ? this.viewModelBoxes() : []);
+      this.renderer.setSprites(this.swarm.spriteList(this.orbits));
       this.renderer.setTransientLights(lights);
       this.renderer.render(this.player, raw);
       this.map.draw(this.dungeon, this.player, floorIndex, { doors: this.compiled.doors });
@@ -761,6 +867,57 @@ export class Game {
 
     requestAnimationFrame((t) => this.frame(t));
   }
+
+  /**
+   * The weapon in your hands. Drawn as world-space boxes pinned to the camera,
+   * with sway and recoil - it is most of what makes shooting feel like shooting.
+   */
+  viewModelBoxes() {
+    const yaw = this.player.yaw;
+    const pitch = this.player.pitch;
+    const cp = Math.cos(pitch);
+    const forward = [Math.sin(yaw) * cp, Math.sin(pitch), -Math.cos(yaw) * cp];
+    const right = [Math.cos(yaw), 0, Math.sin(yaw)];
+    const up = [
+      right[1] * forward[2] - right[2] * forward[1],
+      right[2] * forward[0] - right[0] * forward[2],
+      right[0] * forward[1] - right[1] * forward[0],
+    ];
+    const basis = [right, up, forward];
+    const eye = this.eyePoint();
+    const recoil = this.recoil || 0;
+    const bob = this.walkBob || 0;
+    const sway = Math.sin(bob) * 0.008;
+    const heave = Math.abs(Math.cos(bob)) * 0.007;
+
+    const at = (f, r, u) => [
+      eye[0] + forward[0] * f + right[0] * r + up[0] * u,
+      eye[1] + forward[1] * f + right[1] * r + up[1] * u,
+      eye[2] + forward[2] * f + right[2] * r + up[2] * u,
+    ];
+    const part = (f, r, u, hr, hu, hf, colour, emissive) => {
+      const p = at(f, r, u);
+      const box = new Box(p[0], p[1], p[2], hr, hu, hf, colour, 'weapon', emissive || 0);
+      box.basis = basis;
+      return box;
+    };
+
+    const depth = 0.60 - recoil * 0.06;
+    const side = 0.155 + sway;
+    const drop = -0.150 - heave + recoil * 0.022;
+    const boxes = [];
+    boxes.push(part(depth, side, drop, 0.016, 0.019, 0.080, rgb('stone', 3), 0.04));
+    boxes.push(part(depth + 0.105, side, drop + 0.004, 0.008, 0.008, 0.055, rgb('stone', 1), 0.02));
+    boxes.push(part(depth + 0.02, side, drop + 0.026, 0.005, 0.010, 0.012, rgb('stone', 2), 0));
+    boxes.push(part(depth - 0.055, side, drop - 0.042, 0.011, 0.030, 0.014, rgb('bone', 0), 0));
+    const level = this.player.charge / PLAYER.maxCharge;
+    boxes.push(part(depth - 0.012, side - 0.017, drop + 0.006, 0.004, 0.008, 0.052 * Math.max(0.1, level),
+      level > 0.25 ? rgb('ice', 3) : rgb('blood', 3), 1.0));
+    if ((this.muzzleWeapon || 0) > 0) {
+      boxes.push(part(depth + 0.18, side, drop + 0.004, 0.03, 0.03, 0.05, rgb('ember', 4), 1.0));
+    }
+    return boxes;
+  }
 }
 
-export { PLAYER, PULSE, BLAST, ROOM_TYPE, Box };
+export { PLAYER, SURGE, BLAST };

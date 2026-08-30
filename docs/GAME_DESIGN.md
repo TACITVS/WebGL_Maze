@@ -7,60 +7,115 @@ balance was actually measured.
 
 ## The loop
 
-> Descend four floors. Find the keys that open the way down. Kill the Warden.
+> Kill the quota. Take the way down, or stay and get stronger. Kill the Warden.
 
-One run is one generated dungeon, about two to three minutes if you are quick.
-The minute-to-minute loop is:
+Nexus Depths is a **bullet heaven in first person**. Your weapons fire
+themselves. Your job is where you stand, where you look, and what you pick up.
 
-1. **Explore** a floor, revealing it on the automap.
-2. **Fight** what notices you — and monsters call their neighbours, so fights
-   escalate rather than queueing up politely.
-3. **Collect** the key drops and health/charge that kills leave behind.
-4. **Descend**, which heals you 25, refills your charge, and pays 750 points.
+One floor is one turn of the loop:
 
-The hook is the **combo multiplier**: kills within four seconds of each other
-chain, up to ×5. It decays fast and resets completely when you take a hit, so the
-scoring rewards moving forward and killing cleanly rather than retreating down a
-corridor and plinking. Score and best-score persist between runs, which is what
-makes "one more run" a real question.
+1. **Purge the quota** — 34 kills on depth 1, rising by 22 each floor. Every
+   kill drops essence; essence fills a bar across the bottom of the screen.
+2. **Level** whenever the bar fills, which is every few seconds. Time stops and
+   three procedurally generated capabilities are dealt face up. Press 1, 2 or 3.
+3. **The rift opens** when the quota is met, and the compass points at it.
+4. **Choose**: descend, which heals you 30, refills your charge and pays 1200 —
+   or stay. Staying is how you get stronger. Staying is also how you die: the
+   spawn rate keeps climbing the whole time you are on a floor, and it climbs
+   *faster* once the rift is open.
+
+That choice, every ninety seconds or so, is the game. Descending is safety and
+resets the pressure; staying is power at compounding risk.
+
+### The chain
+
+Kills inside a short window chain. The multiplier climbs to ×2.6 on score and
+×1.8 on essence, and the window **tightens** as the chain grows — 2.2 seconds
+from cold, 1.05 seconds once you are deep into one. Taking a hit costs you half
+the chain.
+
+The meter only ever falls. That is the point: it is the thing that makes you
+push into the next room instead of backing into a corridor, and the reason the
+run summary reports your best chain alongside your score.
+
+## Procedurally generated capabilities
+
+No two runs hand you the same tools. A weapon is assembled from parts:
+
+| Part | Count | What it decides |
+| --- | --- | --- |
+| **Core** | 8 | How it fires — bolt, scatter, lance, nova, seeker, chain, orbit, mortar |
+| **Element** | 6 | Colour, sound, and the on-hit effect — burn, slow, pull, arc… |
+| **Prefix** | 12 | The stat it bends — Rapid, Heavy, Twin, Vast, Cruel, Endless… |
+| **Rarity** | 4 | A flat multiplier, weighted toward the good ones as you descend |
+
+That is 2,304 base identities before rarity, each levelling nine times, plus ten
+relic families that roll their own magnitudes. `Ravenous Frost Orbit` and
+`Wailing Void Chain` are not hand-written entries in a table; they are rolled,
+named and costed at the moment they are offered, and their card text is
+generated from the stats they actually have.
+
+Two rules keep the offer honest:
+
+- **While the rack has room, one of the three cards is always a weapon.** A
+  bullet heaven only sings once several things are firing at once, and a rack
+  that filled by chance left too many runs stuck on the gun they started with.
+- **Once the rack is full at five, weapons stop being offered at all.** A card
+  you cannot take is worse than no card, so the late offer is upgrades and
+  relics — the build converges instead of sprawling.
 
 ## Mechanics
 
-**Movement** — WASD, `Shift` to sprint. The same collision query the dungeon
-validator uses, so you can never clip a wall or fall through a staircase.
+**Movement** — WASD, `Shift` to sprint. Crawlers run at 4.35 m/s and you walk at
+3.9, so **walking is never an escape and sprinting always is**. That is a
+deliberate line: the horde closes on anyone who stands and shoots, and breaking
+away is always available and always costs you your firing position.
 
-**Pulse** (left click) — hitscan, 17 damage, 7 charge, ~7 shots/second. Your
-bread and butter.
+**Auto-fire** — every weapon fires on its own cooldown at whatever is in front
+of you, with a generous aim cone. You never click to shoot.
 
-**Blast** (right click / `Space`) — 52 direct plus 34 splash in a 3.3 m radius,
-34 charge, with knockback. Charge regenerates at 24/s after a short delay, so the
-real decision every fight is *when to spend a blast* — dumping it on one crawler
-means you have nothing when three wraiths round the corner.
+**Surge** (left click, 26 charge) — resets every weapon's cooldown and fires the
+whole rack at once. The alpha strike.
 
-**Charge** replaces ammo. You are never out of bullets, but you can be caught
-mid-reload-by-another-name, which keeps pressure on without the frustration of
-scavenging.
+**Blast** (right click / `Space`, 38 charge) — 60 damage in a 4.2 m radius with
+heavy knockback. The panic button: it buys space rather than kills.
 
-**Health** does not regenerate. It comes from drops and from descending. Pickups
-drift toward you once you are within 2.8 m — a reward you have to walk exactly
-over is a reward most players never collect.
+**Charge** regenerates at 19/s. Health does not regenerate — it comes from
+drops, from descending, and from levelling.
+
+**Levelling heals a quarter of what is missing**, not a flat amount. Near death a
+level is a genuine rescue; at full hull it is worth nothing. The flat version did
+the opposite: levels arrive fastest when you are killing well, so it pinned a
+strong build at maximum hull and the fight stopped being able to threaten it.
+
+**Desperation drops** — the lower your hull, the more often a kill leaves health
+behind. A run that is nearly over can still be clawed back, and clawing it back
+is the thing players replay for.
 
 ## Enemies
 
 | | HP | Speed | Attack | Role |
 | --- | --- | --- | --- | --- |
-| **Crawler** | 26 | 3.8 | melee 8 | Fast, weak, arrives in numbers |
-| **Sentinel** | 78 | 1.45 | projectile 11 | Slow artillery; punishes standing still |
-| **Wraith** | 44 | 2.5 (lunges) | melee 15 | Closes fast, hits hard |
-| **The Warden** | 620 | 1.7 | 3-shot spread, 17 each | The boss |
+| **Crawler** | 17 | 4.35 | melee 5 | Fast, weak, arrives in numbers |
+| **Wraith** | 34 | 3.5 (lunges) | melee 9 | Closes fast, hits hard |
+| **Sentinel** | 62 | 1.6 | projectile 8 | Slow artillery; punishes standing still |
+| **The Warden** | scaled | 1.9 | 3-shot spread, 16 each | The boss |
 
-Every attack is **telegraphed**: the enemy swells, glows, lights the room and
-plays a rising warning tone during its wind-up. Hitting an enemy mid-wind-up
-staggers it and cancels the attack, so aggression is rewarded and the fights stay
-readable rather than random. The boss is the exception — it cannot be staggered.
+Enemy HP is low and counts are high — up to 150 live at once, with a live
+ceiling per floor that ramps from 34 to about 118 as you linger. Elites roll in
+at 3.5% and up, with 3.2× health and five times the essence.
 
-The mix shifts with depth: depth 1 is mostly crawlers, depth 4 is mostly
-sentinels and wraiths, and enemy count scales from 7 to 19 per floor.
+**Monsters hear you.** Sight wakes one instantly; anything within 26 m wakes
+after 1.8 seconds whether or not it has line of sight. Your weapons never stop
+firing, so anything sharing a room-and-a-half with you is coming. Without this a
+player who held one corner simply ran out of enemies — see the measurement
+section below.
+
+**The Warden scales to whatever walks into the room.** Builds arriving at depth 4
+range from a level-eight scrape to a level-thirty engine of destruction, and a
+fixed pool cannot serve both: the 1500 hit points that are a wall for one are two
+and a half seconds for the other. Its health is set when it wakes, against your
+level.
 
 ## Direction and readability
 
@@ -68,9 +123,17 @@ Getting lost is not difficulty, it is just tedium. So:
 
 - a **compass chevron** points at the nearest way down, or at the Warden;
 - the **automap** reveals as you go, colour-codes rooms by type, and marks
-  stairwells, keys and locked doors;
-- the **objective line** always names the next concrete thing to do;
+  stairwells;
+- the **objective line** always names the next concrete thing to do — how many
+  are left to purge, or that the way down is open;
+- the **quota pips and essence bar** are the two things you glance at, and they
+  sit where the eye already is: the bar runs the full width above the console;
 - each floor has its own **palette and name**, so depth is legible at a glance.
+
+The game runs the generator with `locks: 0`. Keys and locked doors still exist —
+the generator places them on graph bridges and `lab.html` still exercises them —
+but the descent here is gated on kills, not on searching. Hunting for a key is a
+different game to the one the auto-fire loop is asking you to play.
 
 ## Art direction
 
@@ -163,49 +226,84 @@ you are doing instead of looping obliviously underneath it.
 
 ## How the balance was measured
 
-The tuning was not guesswork. `botrun.mjs` plays complete runs headlessly: a bot
-follows the solution route, shoots whatever it can see, uses a blast when three
-or more enemies cluster, and **never dodges**. That makes it a deliberately
-pessimistic proxy — if the bot usually survives, a human who strafes definitely
-can.
+Tuning was not guesswork, and the instrument matters more than the numbers it
+produced. `bhsim.mjs` runs the entire loop headlessly at a true 60 fps —
+movement, auto-fire, orbits, essence, level-ups, card picks, spawn waves,
+descent — with no renderer in the way. This was built after discovering that the
+in-browser test ran at roughly 5 fps under software rasterisation and was
+therefore reporting the pacing at half speed.
 
-The first pass was revealing:
+The bot sprints when kited, blasts when three enemies close, and dumps a surge
+when charge is banked, so it is a fair proxy rather than a pessimistic one.
+
+The check that mattered most was not "does the bot win" but **"does the fight
+ever go quiet"**: over any fifteen-second window, did the kill count move? Four
+separate bugs turned up under that single question, none of which was visible
+from playing the game by hand:
+
+1. **The flow field pathed through tiles bodies cannot occupy.** It asked
+   `plan.walkable`, which is a question about the tile map; the movement code
+   asks `canOccupy`, which takes a radius and a height. About 7% of walkable
+   tiles are not standable, and monsters routed into one would press against it
+   forever. Fixed by cutting a passability mask with the same query the movers
+   use, so pathing and movement agree by construction.
+2. **The 150-monster cap was being spent on monsters the player would never
+   meet** — dormant and aggro'd leftovers on floors already descended past. The
+   swarm would sit at its cap with two thirds of it three floors up while the
+   floor underfoot went silent. Off-floor monsters are now budgeted to 24 and
+   the rest forgotten; the spawner refills any floor you walk back onto within
+   seconds, so nothing observable is lost.
+3. **Separation beat the chase vector.** An unbounded sum of push-apart forces
+   overwhelms a single unit vector as soon as a body has four neighbours, so the
+   horde jammed into a static ring a few metres out and milled there. Separation
+   is now normalised and weighted below the chase.
+4. **Sleeping monsters never came.** A player holding a corner ran the floor dry.
+   Hence hearing.
+
+The spawner now also refuses to place a monster that cannot reach you — the flow
+field is already a reachability map from the player, so it is one array lookup —
+and relaxes its distance and line-of-sight rules across three passes rather than
+giving up its budget.
+
+After those fixes, across twelve seeds at four minutes each:
 
 ```
-outcomes: { died: 6 }
-seed 1: died, depth 4, damage taken 132, healed 0, route progress 0.96
-seed 2: died, depth 4, damage taken 132, healed 0, route progress 0.97
+seed  1: survived 240s | level 17 | kills  496 | depth 4 | dead-windows 0
+seed  2: DIED at 129.8s | level 16 | kills  392 | depth 3 | dead-windows 0
+seed  4: survived 240s | level 31 | kills 1497 | depth 4 | dead-windows 0
 ...
+PASS: no seed went quiet
 ```
 
-Every run died at the boss, at 96–98% of the route, having taken *exactly* 132
-damage and healed *zero*. Two design faults, both invisible from playing it by
-hand for a minute:
+Nine of twelve survive four minutes, every seed reaches depth 3 or 4, and the
+kill rate at depth 4 is around six a second. The swarm costs 0.047 ms per frame
+at 98 live monsters, so the frame budget is spent on rasterisation, not on AI.
 
-1. The boss was a wall — 900 HP and 22 damage per shot in a three-shot spread
-   meant six landed hits killed you, and there was no window to fight back.
-2. Health drops sat where enemies died, and players walk past them.
+The Warden was measured separately, against builds a level-twenty run actually
+produces: it now takes 12–39 seconds and 10–74 hull to kill, against 2.5–5.9
+seconds before it was scaled.
 
-Fixing those (boss to 620 HP / 17 damage / slower projectiles, pickup magnetism,
-supplies in the arena) moved it to 6/6 wins — which was then *too* easy for a bot
-that never dodges. Adding aggro propagation so fights escalate, and widening the
-notice range, landed it at:
-
-```
-outcomes: { won: 9, died: 1 }
-```
-
-with most wins finishing between 18 and 35 HP out of 120. That is the target: a
-non-dodging bot barely survives, so a real player has room to be good.
+The general lesson is the one the generator taught first: **a bot that replays
+the player's own rules finds faults inspection cannot.** The original prototype's
+validator sampled a hand-authored centreline and passed 200/200 while producing
+an unplayable lattice. Every real bug in this project — geometry and balance
+alike — was caught by re-asking the exact question the game asks.
 
 ## Extending it
 
-- **New enemy**: one entry in `ENEMY_TYPES`, a weight in `budgetFor`, and three
+- **New enemy**: one entry in `ENEMY_TYPES`, a weight in `pickKind`, and three
   poses in `sprites.js` named `<kind>0`, `<kind>1`, `<kind>2`. The AI, telegraph,
   rendering and drops all key off the type.
-- **New weapon**: follow `firePulse` / `fireBlast` in `game.js` — the raycast,
-  wall trace and splash helpers are already there.
-- **Tuning**: the `PLAYER`, `PULSE` and `BLAST` constants at the top of
-  `game.js`, and `ENEMY_TYPES` in `entities.js`.
-- Re-run the bot after any change. It takes seconds and it will tell you things
-  playing the game yourself will not.
+- **New weapon core**: one entry in `CORES` in `loadout.js`. It immediately
+  crosses with all six elements, twelve prefixes and four rarities, and
+  `describeWeapon` writes its card text from the stats it ends up with. If it
+  needs firing behaviour that does not exist yet, add an `aim` case in
+  `fireWeapon`.
+- **New element or relic**: entries in `ELEMENTS` / `RELICS`. Elements need a
+  matching impact sound in `audio.js` and a case in `applyImpact`.
+- **Tuning**: `PLAYER`, `SURGE`, `BLAST` and `xpForLevel` at the top of
+  `game.js`; `ENEMY_TYPES`, the spawn ramp and the live ceiling in
+  `entities.js`; the quota in `setQuota`.
+- Re-run `bhsim.mjs` after any change, and check dead windows as well as
+  outcomes. It takes seconds and it will tell you things playing the game
+  yourself will not.
