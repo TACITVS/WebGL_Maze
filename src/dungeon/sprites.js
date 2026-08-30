@@ -434,6 +434,16 @@ function drawSpark(px) {
   px(0, 0, 2, 2, '#ffffff');
 }
 
+/** Essence: the thing every kill drops and every level is made of. */
+function drawMote(px) {
+  px(2, 0, 2, 1, hex('ice', 3));
+  px(1, 1, 4, 1, hex('ice', 4));
+  px(0, 2, 6, 2, hex('ice', 4));
+  px(1, 4, 4, 1, hex('ice', 4));
+  px(2, 5, 2, 1, hex('ice', 3));
+  px(2, 2, 2, 2, '#ffffff');
+}
+
 /** A key, so the objective marker is an object rather than a coloured square. */
 function drawKey(px) {
   px(3, 1, 6, 6, hex('ember', 2));
@@ -471,6 +481,7 @@ const SPRITES = [
   { name: 'shot', w: 10, h: 10, draw: (p) => drawShot(p, false) },
   { name: 'shotHot', w: 10, h: 10, draw: (p) => drawShot(p, true) },
   { name: 'spark', w: 2, h: 2, draw: (p) => drawSpark(p) },
+  { name: 'mote', w: 6, h: 6, draw: (p) => drawMote(p) },
 ];
 
 /** Paint every sprite into one canvas and return it with a UV lookup. */

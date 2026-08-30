@@ -29,6 +29,30 @@ const PALETTE = {
 
 const BAR_CELLS = 20;
 
+/** Greedy word wrap in bitmap-font pixels. A long word is broken rather than clipped. */
+function wrapWords(text, maxWidth) {
+  const lines = [];
+  let line = '';
+  for (const word of String(text).split(' ')) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (textWidth(candidate, 1) <= maxWidth || !line) {
+      if (textWidth(candidate, 1) <= maxWidth) { line = candidate; continue; }
+      // A single word wider than the card: break it on the character.
+      let chunk = '';
+      for (const ch of word) {
+        if (textWidth(chunk + ch, 1) > maxWidth && chunk) { lines.push(chunk); chunk = ch; }
+        else chunk += ch;
+      }
+      line = chunk;
+      continue;
+    }
+    lines.push(line);
+    line = word;
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
 export class Hud {
   constructor(canvas) {
     this.canvas = canvas;
@@ -117,6 +141,88 @@ export class Hud {
 
   /* -------------------------------- draw -------------------------------- */
 
+  /**
+   * The level-up offer.
+   *
+   * Three cards, chosen with 1/2/3 so the mouse never has to leave the fight.
+   * The border carries the rarity, which is the first thing the eye lands on
+   * when the game has just stopped dead around you.
+   */
+  drawCards(cards, W, H) {
+    const c = this.ctx;
+    c.fillStyle = 'rgba(4, 7, 12, 0.78)';
+    c.fillRect(0, 0, W, H);
+
+    drawText(c, 'ESSENCE THRESHOLD', Math.round(W / 2), Math.round(H * 0.13),
+      { scale: 1, colour: PALETTE.dim, align: 'center', shadow: PALETTE.shadow });
+    drawText(c, 'CHOOSE ONE', Math.round(W / 2), Math.round(H * 0.13) + 11,
+      { scale: 2, colour: PALETTE.gold, align: 'center', shadow: PALETTE.shadow });
+
+    const cardW = Math.min(132, Math.floor((W - 40) / cards.length));
+    // Height follows the wordiest card, so three cards stay a matched set and
+    // none of them is mostly empty.
+    let bodyLines = 0;
+    for (const card of cards) {
+      let n = wrapWords(String(card.title).toUpperCase(), cardW - 12).length;
+      for (const text of card.lines) n += wrapWords(text, cardW - 12).length;
+      bodyLines = Math.max(bodyLines, n);
+    }
+    // 21 above the title, 20 for the subtitle and rule, 6 of breathing room.
+    const cardH = Math.max(72, 47 + bodyLines * 9);
+    const gap = 8;
+    const totalW = cards.length * cardW + (cards.length - 1) * gap;
+    const startX = Math.round((W - totalW) / 2);
+    const top = Math.round(H * 0.30);
+
+    cards.forEach((card, i) => {
+      const x = startX + i * (cardW + gap);
+      const tone = hex(card.rarity.colour, 3);
+      c.fillStyle = 'rgba(10, 15, 22, 0.96)';
+      c.fillRect(x, top, cardW, cardH);
+      c.fillStyle = tone;
+      c.fillRect(x, top, cardW, 2);
+      c.fillRect(x, top + cardH - 2, cardW, 2);
+      c.fillRect(x, top, 2, cardH);
+      c.fillRect(x + cardW - 2, top, 2, cardH);
+
+      // Key hint, so the choice is one keystroke away.
+      c.fillStyle = tone;
+      c.fillRect(x + 4, top + 4, 11, 11);
+      drawText(c, String(i + 1), x + 7, top + 6, { scale: 1, colour: '#0a0d12' });
+
+      drawText(c, card.rarity.name, x + cardW - 5, top + 6,
+        { scale: 1, colour: tone, align: 'right' });
+
+      // Title, wrapped: at this width two short lines beat one clipped.
+      const lines = wrapWords(String(card.title).toUpperCase(), cardW - 12);
+      let ty = top + 21;
+      for (const text of lines.slice(0, 3)) {
+        drawText(c, text, x + 6, ty, { scale: 1, colour: PALETTE.ink });
+        ty += 9;
+      }
+      drawText(c, card.subtitle, x + 6, ty + 2, { scale: 1, colour: PALETTE.dim });
+      ty += 15;
+      c.fillStyle = PALETTE.edge;
+      c.fillRect(x + 6, ty, cardW - 12, 1);
+      ty += 5;
+      // Body copy wraps too. Clipping a card's own description mid-word is the
+      // one place the HUD cannot afford to look unfinished: it is the text the
+      // player is being asked to make a decision from.
+      const body = [];
+      for (const text of card.lines) {
+        for (const piece of wrapWords(text, cardW - 12)) body.push(piece);
+      }
+      const room = Math.floor((top + cardH - 6 - ty) / 9);
+      for (const text of body.slice(0, Math.max(1, room))) {
+        drawText(c, text, x + 6, ty, { scale: 1, colour: PALETTE.gold });
+        ty += 9;
+      }
+    });
+
+    drawText(c, 'PRESS 1  2  3', Math.round(W / 2), top + cardH + 10,
+      { scale: 1, colour: PALETTE.dim, align: 'center', shadow: PALETTE.shadow });
+  }
+
   draw(state, dt) {
     this.advance(dt);
     const c = this.ctx;
@@ -128,10 +234,10 @@ export class Hud {
     const cx = Math.round(W / 2);
     const cy = Math.round(H / 2);
 
-    this.crosshair(cx, cy, state.hitmark);
+    if (!state.cards) this.crosshair(cx, cy, state.hitmark);
 
     // --- compass ------------------------------------------------------------
-    if (state.compass) {
+    if (state.compass && !state.cards) {
       const railW = Math.round(W * 0.30);
       const railY = 22;
       c.fillStyle = 'rgba(180, 200, 220, 0.18)';
@@ -141,7 +247,6 @@ export class Hud {
       const behind = Math.abs(state.compass.delta) > Math.PI * 0.55;
       const tone = behind ? PALETTE.dim : PALETTE.gold;
       c.fillStyle = tone;
-      // Chevron pointing at the target.
       c.fillRect(markX - 3, railY + 3, 7, 1);
       c.fillRect(markX - 2, railY + 2, 5, 1);
       c.fillRect(markX - 1, railY + 1, 3, 1);
@@ -159,55 +264,86 @@ export class Hud {
       this.segmentBar(barX, barY + 10, barW, 6, state.boss.ratio, PALETTE.bad, PALETTE.hpEmpty);
     }
 
-    // --- objective and keys ------------------------------------------------
-    drawText(c, state.objective || '', 8, 8, { scale: 1, colour: PALETTE.gold, shadow: PALETTE.shadow });
-    let keyX = 8;
-    for (const lock of state.locks || []) {
-      const label = lock.name;
-      const w = textWidth(label, 1) + 6;
-      c.fillStyle = lock.held ? lock.colour : 'rgba(255,255,255,0.06)';
-      c.fillRect(keyX, 19, w, 11);
-      c.fillStyle = lock.held ? lock.colour : PALETTE.edge;
-      c.fillRect(keyX, 19, w, 1);
-      c.fillRect(keyX, 29, w, 1);
-      c.fillRect(keyX, 19, 1, 11);
-      c.fillRect(keyX + w - 1, 19, 1, 11);
-      drawText(c, label, keyX + 3, 21, {
-        scale: 1,
-        colour: lock.held ? '#0a0d10' : PALETTE.dim,
-      });
-      keyX += w + 4;
+    // --- objective ---------------------------------------------------------
+    drawText(c, state.objective || '', 8, 8, { scale: 1, colour: state.riftOpen ? PALETTE.good : PALETTE.gold, shadow: PALETTE.shadow });
+    drawText(c, `${state.hostiles} HOSTILE${state.hostiles === 1 ? '' : 'S'}`, 8, 18,
+      { scale: 1, colour: PALETTE.dim, shadow: PALETTE.shadow });
+
+    // Quota pips: visible progress toward the way down.
+    if (state.quota && !state.quota.boss && !state.riftOpen) {
+      const pips = 16;
+      const filled = Math.round((state.quota.done / Math.max(1, state.quota.need)) * pips);
+      for (let i = 0; i < pips; i += 1) {
+        c.fillStyle = i < filled ? PALETTE.gold : 'rgba(255,255,255,0.10)';
+        c.fillRect(8 + i * 5, 28, 3, 4);
+      }
     }
 
-    // --- score -------------------------------------------------------------
+    // --- weapon rack -------------------------------------------------------
+    let wy = 40;
+    for (const weapon of state.weapons || []) {
+      c.fillStyle = weapon.ready ? weapon.colour : 'rgba(255,255,255,0.16)';
+      c.fillRect(8, wy + 1, 3, 6);
+      const label = weapon.name.length > 22 ? `${weapon.name.slice(0, 22)}` : weapon.name;
+      drawText(c, label, 14, wy, { scale: 1, colour: weapon.ready ? PALETTE.ink : PALETTE.dim });
+      drawText(c, `L${weapon.level}`, 14 + textWidth(label, 1) + 4, wy, { scale: 1, colour: PALETTE.dim });
+      wy += 10;
+    }
+    if (state.relics) {
+      drawText(c, `${state.relics} RELIC${state.relics === 1 ? '' : 'S'}`, 8, wy + 2,
+        { scale: 1, colour: PALETTE.dim });
+    }
+
+    // --- score and level ---------------------------------------------------
     drawText(c, 'SCORE', W - 8, 8, { scale: 1, colour: PALETTE.dim, align: 'right' });
     drawText(c, String(state.score).padStart(6, '0'), W - 8, 17,
       { scale: 3, colour: PALETTE.ink, align: 'right', shadow: PALETTE.shadow });
-    if (state.combo > 0 && state.comboTimer > 0) {
-      const label = `X${state.multiplier}  ${state.combo} CHAIN`;
-      drawText(c, label, W - 8, 41, { scale: 1, colour: PALETTE.gold, align: 'right', shadow: PALETTE.shadow });
-      const trackW = 70;
-      const trackX = W - 8 - trackW;
-      c.fillStyle = hex('ember', 0);
-      c.fillRect(trackX, 50, trackW, 2);
-      c.fillStyle = PALETTE.gold;
-      c.fillRect(trackX, 50, Math.round(trackW * (state.comboTimer / state.comboWindow)), 2);
+    drawText(c, `LEVEL ${state.level}`, W - 8, 41,
+      { scale: 1, colour: PALETTE.gold, align: 'right', shadow: PALETTE.shadow });
+
+    // --- kill chain --------------------------------------------------------
+    // Only shown once it means something, and it drains in plain sight: the
+    // draining is the whole point, because it is what makes you keep moving.
+    if (state.combo >= 3) {
+      const mult = `X${(state.comboMult || 1).toFixed(2)}`;
+      const hot = state.combo >= 20 ? PALETTE.gold : PALETTE.good;
+      drawText(c, mult, W - 8, 52, { scale: 2, colour: hot, align: 'right', shadow: PALETTE.shadow });
+      const label = `${state.combo} CHAIN`;
+      drawText(c, label, W - 8, 68, { scale: 1, colour: PALETTE.dim, align: 'right' });
+      const meterW = 62;
+      const meterX = W - 8 - meterW;
+      c.fillStyle = PALETTE.edge;
+      c.fillRect(meterX, 79, meterW, 3);
+      c.fillStyle = hot;
+      c.fillRect(meterX, 79, Math.max(1, Math.round(meterW * (state.comboRatio || 0))), 3);
     }
 
     // --- bottom console ----------------------------------------------------
     const barH = 34;
     const barY = H - barH;
+
+    // Essence bar runs the full width above the console: the loop's heartbeat.
+    const xpRatio = Math.max(0, Math.min(1, state.xp / Math.max(1, state.xpNeeded)));
+    c.fillStyle = 'rgba(6,10,16,0.9)';
+    c.fillRect(0, barY - 6, W, 6);
+    c.fillStyle = hex('ice', 0);
+    c.fillRect(0, barY - 5, W, 4);
+    c.fillStyle = hex('ice', 3);
+    c.fillRect(0, barY - 5, Math.round(W * xpRatio), 4);
+    c.fillStyle = hex('ice', 4);
+    c.fillRect(Math.max(0, Math.round(W * xpRatio) - 2), barY - 5, 2, 4);
+
     this.panel(0, barY, W, barH);
 
-    const hpRatio = state.hp / state.maxHp;
-    const hpColour = hpRatio < 0.3 ? PALETTE.hpLow : PALETTE.hp;
+    const hullRatio = state.hull / state.maxHull;
+    const hullColour = hullRatio < 0.3 ? PALETTE.hpLow : PALETTE.hp;
     drawText(c, 'HULL', 8, barY + 6, { scale: 1, colour: PALETTE.dim });
-    this.segmentBar(8, barY + 16, 132, 8, hpRatio, hpColour, PALETTE.hpEmpty);
-    drawText(c, String(Math.ceil(Math.max(0, state.hp))), 146, barY + 15, { scale: 2, colour: hpColour });
+    this.segmentBar(8, barY + 16, 132, 8, hullRatio, hullColour, PALETTE.hpEmpty);
+    drawText(c, String(Math.ceil(Math.max(0, state.hull))), 146, barY + 15, { scale: 2, colour: hullColour });
 
     drawText(c, 'CHARGE', W - 8, barY + 6, { scale: 1, colour: PALETTE.dim, align: 'right' });
-    this.segmentBar(W - 140, barY + 16, 132, 8, state.energy / state.maxEnergy, PALETTE.energy, PALETTE.energyEmpty);
-    drawText(c, String(Math.floor(state.energy)), W - 146, barY + 15,
+    this.segmentBar(W - 140, barY + 16, 132, 8, state.charge / state.maxCharge, PALETTE.energy, PALETTE.energyEmpty);
+    drawText(c, String(Math.floor(state.charge)), W - 146, barY + 15,
       { scale: 2, colour: PALETTE.energy, align: 'right' });
 
     drawText(c, 'DEPTH', cx, barY + 6, { scale: 1, colour: PALETTE.dim, align: 'center' });
@@ -215,7 +351,7 @@ export class Hud {
       { scale: 2, colour: PALETTE.ink, align: 'center', shadow: PALETTE.shadow });
 
     // --- toasts ------------------------------------------------------------
-    let toastY = barY - 16;
+    let toastY = barY - 22;
     for (let i = this.toasts.length - 1; i >= 0; i -= 1) {
       const t = this.toasts[i];
       const fade = t.age > 1.6 ? 1 - (t.age - 1.6) / 0.6 : 1;
@@ -231,20 +367,20 @@ export class Hud {
     }
 
     // --- banner ------------------------------------------------------------
-    if (this.bannerState) {
+    if (this.bannerState && !state.cards) {
       const b = this.bannerState;
       const fade = b.age < 0.25 ? b.age / 0.25 : b.age > 3.0 ? 1 - (b.age - 3.0) / 0.6 : 1;
       c.globalAlpha = Math.max(0, Math.min(1, fade));
-      drawText(c, b.title, cx, Math.round(H * 0.32), { scale: 2, colour: PALETTE.ink, align: 'center', shadow: PALETTE.shadow });
+      drawText(c, b.title, cx, Math.round(H * 0.30), { scale: 2, colour: PALETTE.ink, align: 'center', shadow: PALETTE.shadow });
       if (b.sub) {
-        drawText(c, b.sub, cx, Math.round(H * 0.32) + 20, { scale: 1, colour: PALETTE.gold, align: 'center', shadow: PALETTE.shadow });
+        drawText(c, b.sub, cx, Math.round(H * 0.30) + 20, { scale: 1, colour: PALETTE.gold, align: 'center', shadow: PALETTE.shadow });
       }
       c.globalAlpha = 1;
     }
 
+    if (state.cards) this.drawCards(state.cards, W, H);
+
     // --- scanlines ---------------------------------------------------------
-    // Drawn over everything, including the 3D behind this canvas, which is what
-    // ties the picture together as one screen rather than a game with a UI on top.
     c.fillStyle = 'rgba(0, 0, 0, 0.17)';
     for (let y = 0; y < H; y += 2) c.fillRect(0, y, W, 1);
   }

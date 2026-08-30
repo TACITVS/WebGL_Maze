@@ -200,6 +200,11 @@ label { font-size: 11px; color: var(--dim); letter-spacing: 0.14em; }
 .statRow b { color: var(--ink); }
 .statRow.best b { color: var(--gold); }
 
+.buildLine {
+  margin-top: 10px; padding-top: 8px; font-size: 10px; line-height: 1.8;
+  color: var(--gold); border-top: 1px solid var(--void-1); letter-spacing: 0.06em;
+}
+
 .bestLine {
   margin-top: 14px; font-size: 11px; color: var(--dim);
   text-align: center; letter-spacing: 0.16em;

@@ -41,14 +41,20 @@ python -m http.server 8000
 
 Open `http://localhost:8000/dungeon.html` and press **Descend**.
 
-A first-person roguelike run: four floors down, keys to find, monsters that call
-their neighbours when they spot you, and the Warden waiting in the deepest
-chamber. Kills within four seconds chain into a score multiplier up to ×5, so the
-loop rewards pushing forward rather than retreating. Runs last two to three
-minutes and your best score persists.
+A **bullet heaven in first person**. Your weapons fire themselves; your job is
+where you stand and where you look. Kill the floor's quota to crack open the way
+down, then decide whether to leave or stay and farm while the spawn rate keeps
+climbing. Four floors, then the Warden.
+
+Every kill drops essence, every bar-fill deals you three **procedurally
+generated** capabilities to choose between, and no two runs hand you the same
+ones: weapons are assembled from 8 cores × 6 elements × 12 prefixes × 4 rarities,
+each levelling nine times. Kills chain into a multiplier whose window tightens as
+it climbs and which halves when you are hit, so the meter is only ever falling.
 
 - **WASD** move · **Shift** sprint · **mouse** look
-- **Left click** pulse · **Right click** / **Space** blast · **Esc** pause
+- **Left click** surge (fire everything at once) · **Right click** / **Space**
+  blast · **1 2 3** choose a card · **Esc** pause
 
 It renders at 340p and scales up with nearest-neighbour filtering, so the pixels
 are real. Every colour — sprites, masonry, props, HUD, menus — comes from one
