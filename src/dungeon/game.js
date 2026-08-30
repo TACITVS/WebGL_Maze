@@ -56,6 +56,10 @@ const LOOK = {
   maxSensitivity: 0.010,
   // Just short of straight up and straight down, as every modern shooter does.
   pitchLimit: (89 * Math.PI) / 180,
+  // Vertical FOV in degrees. 74 vertical is about 107 horizontal at 16:9.
+  defaultFov: 74,
+  minFov: 55,
+  maxFov: 100,
 };
 
 const SURGE = { cost: 26, cooldown: 0.55 };
@@ -114,6 +118,14 @@ export class Game {
     this.fireMode = mode === 'manual' ? 'manual' : 'auto';
     this.firing = false;
     this.hasTarget = false;
+    this.fov = this.loadSetting('nexusDepthsFov', LOOK.defaultFov, LOOK.minFov, LOOK.maxFov);
+    this.renderer.fov = (this.fov * Math.PI) / 180;
+    // Hold-to-sprint is the default; toggle suits players who would rather not
+    // hold a key for the entire run.
+    let sprint = 'hold';
+    try { sprint = localStorage.getItem('nexusDepthsSprint') || 'hold'; } catch { sprint = 'hold'; }
+    this.sprintMode = sprint === 'toggle' ? 'toggle' : 'hold';
+    this.sprintLatched = false;
     this.lastFrame = performance.now();
     this.accumulator = 0;
     this.stepSeconds = 1 / 120;
@@ -281,6 +293,29 @@ export class Game {
         this.saveSetting('nexusDepthsSens', this.sensitivity);
       });
     }
+    const fov = document.getElementById('fovInput');
+    const fovValue = document.getElementById('fovValue');
+    if (fov) {
+      fov.value = String(Math.round(this.fov));
+      if (fovValue) fovValue.textContent = fov.value;
+      fov.addEventListener('input', () => {
+        this.fov = Math.max(LOOK.minFov, Math.min(LOOK.maxFov, Number(fov.value)));
+        this.renderer.fov = (this.fov * Math.PI) / 180;
+        if (fovValue) fovValue.textContent = String(Math.round(this.fov));
+        this.saveSetting('nexusDepthsFov', this.fov);
+      });
+    }
+
+    const sprintToggle = document.getElementById('sprintToggleInput');
+    if (sprintToggle) {
+      sprintToggle.checked = this.sprintMode === 'toggle';
+      sprintToggle.addEventListener('change', () => {
+        this.sprintMode = sprintToggle.checked ? 'toggle' : 'hold';
+        this.sprintLatched = false;
+        try { localStorage.setItem('nexusDepthsSprint', this.sprintMode); } catch { /* private mode */ }
+      });
+    }
+
     const auto = document.getElementById('autoFireInput');
     if (auto) {
       auto.checked = this.fireMode === 'auto';
@@ -368,6 +403,10 @@ export class Game {
       if (e.code === 'Escape') { if (this.state === 'playing') this.setPaused(true); return; }
       if (e.code === 'KeyR' && (this.state === 'dead' || this.state === 'victory')) { this.startRun(this.seed); return; }
       if (e.code === 'Enter' && this.state === 'title') { document.getElementById('startBtn').click(); return; }
+      if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+        // In toggle mode a tap flips sprint rather than needing to be held.
+        if (this.sprintMode === 'toggle' && !this.keys.has(e.code)) this.sprintLatched = !this.sprintLatched;
+      }
       if (MOVE_CODES.has(e.code)) { this.keys.add(e.code); if (this.state === 'playing') e.preventDefault(); }
       if (e.code === 'Space' && this.state === 'playing') { this.blasting = true; e.preventDefault(); }
     }, { passive: false });
@@ -845,7 +884,8 @@ export class Game {
     const fz = -Math.cos(this.player.yaw);
     const rx = Math.cos(this.player.yaw);
     const rz = Math.sin(this.player.yaw);
-    const running = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+    const shift = this.keys.has('ShiftLeft') || this.keys.has('ShiftRight');
+    const running = this.sprintMode === 'toggle' ? this.sprintLatched : shift;
     const base = running ? PLAYER.runSpeed : PLAYER.walkSpeed;
     const speed = base * (1 + this.loadout.stats.moveSpeed);
     this.walkBob = (this.walkBob || 0) + dt * (running ? 13 : 8.5);

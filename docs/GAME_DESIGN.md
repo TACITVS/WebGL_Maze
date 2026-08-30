@@ -82,9 +82,19 @@ ceiling climbs past a hundred bodies, so the danger is where they are, not how
 fast they run.
 
 **Looking** — raw mouse deltas with no smoothing and no acceleration, the same
-sensitivity on both axes, and a pitch limit just short of vertical. Sensitivity
-and invert-Y are on the pause screen and persist between runs; a fixed
-sensitivity fits nobody's mouse.
+sensitivity on both axes, and a pitch limit just short of vertical.
+
+**Options** (pause screen, all persisted): auto-fire on/off, look sensitivity,
+field of view (55-100 vertical, 74 default, which is about 107 horizontal at
+16:9), sprint as hold or toggle, and invert-Y.
+
+The movement basis is the standard one and was checked rather than assumed: W
+travels exactly where you are looking, D exactly 90 degrees clockwise of it,
+and pitch has no effect on ground movement - measured across six yaws and three
+pitches, 0 degrees of error on all twelve cases. Nothing but the mouse handler
+ever writes yaw or pitch, so strafing cannot swing the view. Walls slide rather
+than stick: of 1,454 obstructed approaches sampled across a floor, none stopped
+the player dead and most retained 50-97% of their speed.
 
 **Firing** — two modes, toggled in the pause options and remembered between
 runs.
