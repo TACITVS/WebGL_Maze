@@ -12,6 +12,10 @@ const MAX_LIGHTS = 8;
 
 /** Internal render height in pixels. Width follows the viewport aspect. */
 const PIXEL_HEIGHT = 340;
+/** Vertical half-window for a light to count, in metres. Floors are 4.8 apart. */
+const VERTICAL_LIGHT_REACH = 4.0;
+/** Slots the room's own lights always keep, however busy the fight gets. */
+const STATIC_LIGHT_RESERVE = 3;
 
 /** Shared lighting body, so sprites and walls sit in the same world. */
 const LIGHT_UNIFORMS = `
@@ -428,18 +432,51 @@ export class Renderer {
   gatherLights(eye, dt) {
     this.time += dt;
     const near = [];
+    // The shader has no occlusion: a light is a light wherever it is, and floors
+    // sit 4.8 m apart, so a torch one storey down is well inside the 30 m radius
+    // and shines up through solid rock. Worse, being nearer than a torch across
+    // your own room, it takes that torch's slot. A vertical window is the cheap
+    // stand-in for the occlusion test, and it is generous enough that a
+    // staircase - where you genuinely can see two levels - still lights both.
+    const reachesEye = (pos) => Math.abs(pos[1] - eye[1]) <= VERTICAL_LIGHT_REACH;
     for (const light of this.lights) {
+      if (!reachesEye(light.pos)) continue;
       const d = (light.pos[0] - eye[0]) ** 2 + (light.pos[1] - eye[1]) ** 2 + (light.pos[2] - eye[2]) ** 2;
       if (d > 900) continue;
       near.push({ light, d });
     }
     for (const light of this.transient) {
+      if (!reachesEye(light.pos)) continue;
       const d = (light.pos[0] - eye[0]) ** 2 + (light.pos[1] - eye[1]) ** 2 + (light.pos[2] - eye[2]) ** 2;
       if (d > 900) continue;
       // Transient lights are the reason you look up, so bias them forward.
-      near.push({ light: { pos: light.pos, color: light.colour || light.color, intensity: light.intensity }, d: d * 0.35 });
+      near.push({
+        light: { pos: light.pos, color: light.colour || light.color, intensity: light.intensity },
+        d: d * 0.35, transient: true,
+      });
     }
     near.sort((a, b) => a.d - b.d);
+
+    // Reserve slots for the room's own lighting.
+    //
+    // Transients are deliberately biased forward, and in a fight there are
+    // always more of them than there are slots - muzzle flashes, impacts, every
+    // monster winding up. Without a reservation they take all eight and the
+    // authored torchlight switches off exactly when the room is busiest, which
+    // reads as the level going black rather than as the fight getting loud.
+    const statics = near.filter((e) => !e.transient);
+    if (statics.length) {
+      const reserve = Math.min(STATIC_LIGHT_RESERVE, statics.length, MAX_LIGHTS);
+      const chosen = near.slice(0, MAX_LIGHTS - reserve);
+      for (const entry of statics) {
+        if (chosen.length >= MAX_LIGHTS) break;
+        if (!chosen.includes(entry)) chosen.push(entry);
+      }
+      chosen.sort((a, b) => a.d - b.d);
+      near.length = 0;
+      for (const entry of chosen) near.push(entry);
+    }
+
     for (let i = 0; i < MAX_LIGHTS; i += 1) {
       const entry = near[i];
       if (!entry) {

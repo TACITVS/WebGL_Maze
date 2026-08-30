@@ -599,11 +599,12 @@ export class Swarm {
     if (hooks.onFire) hooks.onFire(weapon, origin);
   }
 
-  spawnEnemyProjectile(from, dir, speed, damage, colour) {
+  spawnEnemyProjectile(from, dir, speed, damage, colour, floor) {
     this.projectiles.push({
       x: from[0], y: from[1], z: from[2],
       vx: dir[0] * speed, vy: dir[1] * speed, vz: dir[2] * speed,
       damage, size: 0.34, colour, owner: 'enemy', life: 4.5, pierce: 0, chain: 0,
+      floor,
     });
   }
 
@@ -661,7 +662,7 @@ export class Swarm {
         this.arcs.push({
           from: [from.x, from.y + from.type.height * 0.5, from.z],
           to: [next.enemy.x, next.enemy.y + next.enemy.type.height * 0.5, next.enemy.z],
-          colour: s.trail || projectile.colour, life: 0.13,
+          colour: s.trail || projectile.colour, life: 0.13, floor: from.floor,
         });
         this.hurt(next.enemy, projectile.damage * 0.7, null, hooks);
         from = next.enemy;
@@ -859,7 +860,7 @@ export class Swarm {
         this.spawnEnemyProjectile(
           [enemy.x, eyeY, enemy.z],
           [dir[0] * cos - dir[2] * sin, dir[1], dir[0] * sin + dir[2] * cos],
-          type.projectileSpeed, type.damage, type.eye,
+          type.projectileSpeed, type.damage, type.eye, enemy.floor,
         );
       }
       if (hooks.onEnemyShoot) hooks.onEnemyShoot(enemy);
@@ -909,6 +910,7 @@ export class Swarm {
           break;
         }
         if (p.owner === 'enemy') {
+          if (p.floor !== undefined && p.floor !== this.physics.floorAt(player.y)) continue;
           const d = Math.hypot(p.x - player.x, p.y - (player.y + 1.0), p.z - player.z);
           if (d < 0.6) {
             if (hooks.onPlayerHit) hooks.onPlayerHit(p.damage, null);
@@ -1038,13 +1040,18 @@ export class Swarm {
 
   /* ---------------------------- rendering ------------------------------ */
 
-  spriteList(orbits) {
+  spriteList(orbits, floorIndex) {
     const frames = this.frames;
     const out = [];
     if (!frames) return out;
+    // Everything on every floor used to be submitted every frame - roughly
+    // 50% more sprites than could possibly be seen, and anything visible
+    // through a stairwell opening showed a body standing in mid-air a storey
+    // away.
+    const visible = (thing) => floorIndex === undefined || thing.floor === undefined || thing.floor === floorIndex;
 
     for (const enemy of this.enemies) {
-      if (enemy.hp <= 0) continue;
+      if (enemy.hp <= 0 || !visible(enemy)) continue;
       const type = enemy.type;
       const winding = enemy.state === 'windup';
       const tell = winding ? Math.min(1, enemy.stateTime / type.windup) : 0;
@@ -1076,7 +1083,7 @@ export class Swarm {
     const shotHot = frames.get('shotHot');
     for (const p of this.projectiles) {
       const frame = p.owner === 'enemy' ? (shotHot || shot) : shot;
-      if (!frame) continue;
+      if (!frame || !visible(p)) continue;
       const size = p.size * 2.2;
       out.push({
         x: p.x, y: p.y - size / 2, z: p.z, w: size, h: size, frame,
@@ -1139,24 +1146,51 @@ export class Swarm {
     return out;
   }
 
-  lights() {
+  /**
+   * The dynamic lights this frame, on the player's floor, rationed by category.
+   *
+   * The renderer keeps eight slots and fills them with whatever is nearest. An
+   * unbudgeted category therefore does not just take its share, it takes the
+   * lot: with ninety monsters on a floor there are dozens of wind-up glows a
+   * couple of metres away, and they evicted every one of the seventy-odd
+   * torches within range. The authored lighting of the room simply switched off
+   * whenever a crowd formed, and the place was lit by monster eyes instead.
+   *
+   * So each category gets a cap and, within it, the nearest ones win. Together
+   * they can claim at most half the slots, which leaves the room's own light
+   * still doing the work.
+   */
+  lights(floorIndex, player) {
     const out = [];
-    // Only the nearest few shots earn a light; the renderer keeps eight slots.
-    let budget = 6;
-    for (const p of this.projectiles) {
-      if (budget-- <= 0) break;
-      out.push({ pos: [p.x, p.y, p.z], colour: p.colour, intensity: 0.85 });
-    }
+    const px = player ? player.x : 0;
+    const pz = player ? player.z : 0;
+    const onFloor = (thing) => floorIndex === undefined || thing.floor === undefined || thing.floor === floorIndex;
+    const nearest = (list, cap, toLight) => {
+      const scored = [];
+      for (const item of list) {
+        if (!onFloor(item)) continue;
+        scored.push({ item, d: (item.x - px) ** 2 + (item.z - pz) ** 2 });
+      }
+      scored.sort((a, b) => a.d - b.d);
+      for (let i = 0; i < Math.min(cap, scored.length); i += 1) out.push(toLight(scored[i].item));
+      return out;
+    };
+
+    nearest(this.projectiles, 2, (p) => ({ pos: [p.x, p.y, p.z], colour: p.colour, intensity: 0.85 }));
+    nearest(this.pickups, 1, (item) => ({
+      pos: [item.x, item.y + 0.5, item.z],
+      colour: item.kind === 'health' ? rgb('blood', 3) : rgb('ice', 3),
+      intensity: 0.5,
+    }));
+    nearest(
+      this.enemies.filter((e) => e.state === 'windup' && e.hp > 0), 2,
+      (e) => ({ pos: [e.x, e.y + e.type.height * 0.8, e.z], colour: e.type.eye, intensity: 1.2 }),
+    );
+    // Arcs are a handful of frames long and are the clearest read on a chain
+    // firing, so they are not rationed - but they are still floor-bound.
     for (const arc of this.arcs) {
+      if (floorIndex !== undefined && arc.floor !== undefined && arc.floor !== floorIndex) continue;
       out.push({ pos: arc.to, colour: arc.colour, intensity: 1.6 });
-    }
-    for (const item of this.pickups) {
-      const colour = item.kind === 'health' ? rgb('blood', 3) : rgb('ice', 3);
-      out.push({ pos: [item.x, item.y + 0.5, item.z], colour, intensity: 0.5 });
-    }
-    for (const enemy of this.enemies) {
-      if (enemy.state !== 'windup' || enemy.hp <= 0) continue;
-      out.push({ pos: [enemy.x, enemy.y + enemy.type.height * 0.8, enemy.z], colour: enemy.type.eye, intensity: 1.2 });
     }
     return out;
   }

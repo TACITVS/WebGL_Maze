@@ -383,6 +383,41 @@ first two are the ones a player feels.
    had ever touched and never dropped one, growing without bound across the
    thousands of kills a long run produces.
 
+### A second pass, and a standing invariant harness
+
+`tools/invariants.mjs` plays full runs headlessly and asserts the rules
+continuously rather than only asking whether the loop keeps moving: no NaN in
+any position or stat, hull and charge inside their bounds, quota never
+overshooting, the enemy cap respected, every projectile carrying a floor, no
+weapon past level nine or the rack past five, and - the one the last pass earned
+- no damage ever crossing between floors. It runs in seconds and is the cheapest
+way to keep a fixed bug fixed.
+
+It immediately found that **enemy projectiles carried no floor at all**, which
+also meant nothing could filter them. That thread led to three more:
+
+- **The renderer's eight light slots were entirely consumed by monsters.** Every
+  winding-up enemy emitted a light, unbudgeted and unfiltered, and the renderer
+  fills its slots with whatever is nearest. In a fight that is dozens of glows a
+  couple of metres away, and they evicted all seventy-odd torches in range: the
+  room's authored lighting switched off exactly when the room was busiest, and
+  the place was lit by monster eyes. Dynamic lights are now rationed per
+  category with the nearest winning, and the renderer reserves three slots for
+  static light however loud the fight gets.
+- **Lights reached through floors.** The shader has no occlusion and floors are
+  4.8 m apart, so a torch one storey down was inside the 30 m radius and, being
+  nearer than a torch across your own room, took its slot. A vertical window now
+  stands in for the occlusion test, wide enough that a staircase still lights
+  both levels.
+- **Every sprite on every floor was submitted every frame** - about 15% more
+  sprites than could be seen, and anything visible through a stairwell opening
+  showed a body standing in mid-air a storey away.
+
+Plus two smaller ones: transient muzzle and impact lights were not cleared
+between runs, so a new dungeon opened with stray lights hanging in unrelated
+geometry; and `Tab` on the card screen fell through to the browser, moving focus
+off the canvas so the keys stopped arriving.
+
 One suspicion did *not* survive checking: the player runs on a fixed 1/120
 timestep while the swarm runs on the frame delta, which looked like a desync
 waiting to happen. Both advance by the same accumulated time, so they stay in
@@ -409,6 +444,6 @@ alike — was caught by re-asking the exact question the game asks.
 - **Tuning**: `PLAYER`, `SURGE`, `BLAST` and `xpForLevel` at the top of
   `game.js`; `ENEMY_TYPES`, the spawn ramp and the live ceiling in
   `entities.js`; the quota in `setQuota`.
-- Re-run `bhsim.mjs` after any change, and check dead windows as well as
-  outcomes. It takes seconds and it will tell you things playing the game
+- Re-run `tools/invariants.mjs` and `bhsim.mjs` after any change, and check
+  dead windows as well as outcomes. It takes seconds and it will tell you things playing the game
   yourself will not.

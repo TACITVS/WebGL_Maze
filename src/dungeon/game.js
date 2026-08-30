@@ -212,6 +212,9 @@ export class Game {
     this.compass = null;
     this.pendingCards = null;
     this.banked = 0;
+    // These are world positions in the dungeon that just ended; carried into a
+    // new one they are stray lights hanging in unrelated geometry.
+    this.flashes = [];
     this.orbits = [];
     this.muzzle = null;
     this.combo = 0;
@@ -397,6 +400,9 @@ export class Game {
       if (this.state === 'levelup') {
         const index = ['Digit1', 'Digit2', 'Digit3'].indexOf(e.code);
         if (index >= 0) { this.chooseCard(index); e.preventDefault(); }
+        // Tab is ours while the cards are up; letting it through moves browser
+        // focus to a button behind the canvas and the keys stop arriving.
+        if (e.code === 'Tab') e.preventDefault();
         return;
       }
       if (e.code === 'Tab') { this.openCards(); e.preventDefault(); return; }
@@ -1092,7 +1098,7 @@ export class Game {
       this.updateHud(floorIndex, raw);
 
       // Flashes decay here so they live exactly as long on screen as in the ear.
-      const lights = this.swarm.lights();
+      const lights = this.swarm.lights(floorIndex, this.player);
       if (this.flashes) {
         for (const f of this.flashes) f.life -= raw;
         this.flashes = this.flashes.filter((f) => f.life > 0);
@@ -1104,7 +1110,7 @@ export class Game {
 
       this.renderer.shake = this.shake;
       this.renderer.setDynamic(this.state === 'playing' || this.state === 'levelup' ? this.viewModelBoxes() : []);
-      this.renderer.setSprites(this.swarm.spriteList(this.orbits));
+      this.renderer.setSprites(this.swarm.spriteList(this.orbits, floorIndex));
       this.renderer.setTransientLights(lights);
       this.renderer.render(this.player, raw);
       this.map.draw(this.dungeon, this.player, floorIndex, { doors: this.compiled.doors });
