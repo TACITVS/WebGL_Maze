@@ -66,10 +66,23 @@ Two rules keep the offer honest:
 
 ## Mechanics
 
-**Movement** — WASD, `Shift` to sprint. Crawlers run at 4.35 m/s and you walk at
-3.9, so **walking is never an escape and sprinting always is**. That is a
-deliberate line: the horde closes on anyone who stands and shoots, and breaking
-away is always available and always costs you your firing position.
+**Movement** — WASD, `Shift` to sprint, 5.7 m/s and 8.4 m/s. You outrun the
+horde in open ground; the threat is **being surrounded, not being outpaced**.
+
+This was originally the other way round — 3.9 m/s against a crawler's 4.35, on
+the theory that "walking is never an escape and sprinting always is". It read
+well and played terribly. Being slower than the thing chasing you does not make
+the game tense, it makes Shift mandatory, and a game you must hold a key to play
+at a normal speed feels sluggish in the hand no matter what the design note says.
+Encirclement is the better pressure and the one a bullet heaven is built on: the
+spawner rings you at five to thirty metres in every direction and the floor
+ceiling climbs past a hundred bodies, so the danger is where they are, not how
+fast they run.
+
+**Looking** — raw mouse deltas with no smoothing and no acceleration, the same
+sensitivity on both axes, and a pitch limit just short of vertical. Sensitivity
+and invert-Y are on the pause screen and persist between runs; a fixed
+sensitivity fits nobody's mouse.
 
 **Auto-fire** — every weapon fires on its own cooldown at whatever is in front
 of you, with a generous aim cone. You never click to shoot.
@@ -82,6 +95,12 @@ heavy knockback. The panic button: it buys space rather than kills.
 
 **Charge** regenerates at 19/s. Health does not regenerate — it comes from
 drops, from descending, and from levelling.
+
+**The card screen hands the pointer back** and you click the card you want.
+While the pointer stayed locked the only mouse affordance was "any click takes
+card one" — and since the left button is also the surge, a level-up arriving
+mid-fight was routinely spent before it could be read. There is a short grace
+period too, so a click already in flight cannot buy anything.
 
 **Levelling heals a quarter of what is missing**, not a flat amount. Near death a
 level is a genuine rescue; at full hull it is worth nothing. The flat version did
@@ -282,6 +301,60 @@ at 98 live monsters, so the frame budget is spent on rasterisation, not on AI.
 The Warden was measured separately, against builds a level-twenty run actually
 produces: it now takes 12–39 seconds and 10–74 hull to kill, against 2.5–5.9
 seconds before it was scaled.
+
+### Where the frame actually goes
+
+Profiling per subsystem, with 89 monsters live, found the cost was not where it
+looked. The HUD was **1.39 ms a frame — more than rendering the entire 3D world
+beside it**, and 58% of all JavaScript. The bitmap font drew one `fillRect` per
+lit pixel, up to seventy per character once the shadow pass is counted, and the
+HUD is redrawn every frame. Painting each glyph once into a small canvas and
+blitting it, plus writing the damage-flash inline style only when it changes
+rather than every frame, took the HUD to 0.85 ms and the whole frame's
+JavaScript to about 2.0 ms.
+
+### Five bugs found by reading the code against its own rules
+
+A later audit, prompted by the game simply feeling *odd* to play, turned up five
+defects that neither the simulation nor the browser tests were asking about. The
+first two are the ones a player feels.
+
+1. **Splash and chain damage passed through floors.** `nearby()` is a flat 2D
+   spatial hash - it answers "what is near this x/z" across every floor at once,
+   because separation only ever asked within one floor and filtered afterwards.
+   Splash and chain forgot to filter. Floors are 4.8 m apart, and a shell
+   bursting on one killed whatever stood at the same x/z on the next one down.
+   Worse, those kills counted toward the quota while their essence dropped on a
+   floor the player was not on to collect: the bar filled from kills you never
+   saw and never got paid for. `nearestTo` and `targetFor` in the same file
+   filter correctly, which is what marked it as an oversight rather than intent.
+
+2. **One auto-aim lock in five was through a wall.** `targetFor` ranked
+   candidates by facing and distance and never asked whether it could see them.
+   Sampled across five seeds on a populated floor: 398 of 2,000 locks were
+   behind solid rock. With weapons that fire themselves, that is a fifth of all
+   damage spent shooting masonry, with the impact sounds and lights to match.
+   Sight is now tested lazily down the ranked list and capped at six rays, and
+   returning nothing is a real answer - the caller then fires straight ahead,
+   which is where the player is looking anyway.
+
+3. **Blast radius silently ignored the area stat.** `const radius = s.blast *
+   (1 + 0);` - a placeholder never filled in. The radius is now baked onto the
+   projectile at fire time, where the bonus is actually known.
+
+4. **Seeded runs did not reproduce.** Crit rolls used `Math.random()` rather
+   than the seeded stream, so the same seed gave a different run. Every other
+   `Math.random()` in the gameplay files is cosmetic - particle scatter, audio
+   pitch, sprite bob - and this one was the exception.
+
+5. **Orbit weapons leaked memory.** `hitClock` recorded every enemy id an orbit
+   had ever touched and never dropped one, growing without bound across the
+   thousands of kills a long run produces.
+
+One suspicion did *not* survive checking: the player runs on a fixed 1/120
+timestep while the swarm runs on the frame delta, which looked like a desync
+waiting to happen. Both advance by the same accumulated time, so they stay in
+step; it is a difference in integration granularity, not a bug.
 
 The general lesson is the one the generator taught first: **a bot that replays
 the player's own rules finds faults inspection cannot.** The original prototype's

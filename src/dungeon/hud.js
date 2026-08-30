@@ -174,16 +174,24 @@ export class Hud {
     const startX = Math.round((W - totalW) / 2);
     const top = Math.round(H * 0.30);
 
+    // Remember where each card landed so the game can hit-test a click against
+    // it. The HUD owns the layout, so the HUD is what knows the rectangles.
+    this.cardRects = cards.map((_, i) => ({
+      x: startX + i * (cardW + gap), y: top, w: cardW, h: cardH,
+    }));
+
     cards.forEach((card, i) => {
       const x = startX + i * (cardW + gap);
       const tone = hex(card.rarity.colour, 3);
-      c.fillStyle = 'rgba(10, 15, 22, 0.96)';
+      const hovered = i === this.hoverCard;
+      c.fillStyle = hovered ? 'rgba(22, 32, 46, 0.98)' : 'rgba(10, 15, 22, 0.96)';
       c.fillRect(x, top, cardW, cardH);
       c.fillStyle = tone;
-      c.fillRect(x, top, cardW, 2);
-      c.fillRect(x, top + cardH - 2, cardW, 2);
-      c.fillRect(x, top, 2, cardH);
-      c.fillRect(x + cardW - 2, top, 2, cardH);
+      const edge = hovered ? 3 : 2;
+      c.fillRect(x, top, cardW, edge);
+      c.fillRect(x, top + cardH - edge, cardW, edge);
+      c.fillRect(x, top, edge, cardH);
+      c.fillRect(x + cardW - edge, top, edge, cardH);
 
       // Key hint, so the choice is one keystroke away.
       c.fillStyle = tone;
@@ -219,7 +227,7 @@ export class Hud {
       }
     });
 
-    drawText(c, 'PRESS 1  2  3', Math.round(W / 2), top + cardH + 10,
+    drawText(c, 'CLICK A CARD  OR PRESS 1  2  3', Math.round(W / 2), top + cardH + 10,
       { scale: 1, colour: PALETTE.dim, align: 'center', shadow: PALETTE.shadow });
   }
 
@@ -378,7 +386,9 @@ export class Hud {
       c.globalAlpha = 1;
     }
 
+    this.hoverCard = state.hoverCard === undefined ? -1 : state.hoverCard;
     if (state.cards) this.drawCards(state.cards, W, H);
+    else this.cardRects = null;
 
     // --- scanlines ---------------------------------------------------------
     c.fillStyle = 'rgba(0, 0, 0, 0.17)';

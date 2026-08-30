@@ -215,3 +215,58 @@ label { font-size: 11px; color: var(--dim); letter-spacing: 0.14em; }
   .mapwrap { width: 84px; height: 84px; }
   .cols { gap: 14px; }
 }
+
+
+/* --- pause-screen settings ------------------------------------------------ */
+
+.settings {
+  margin: 18px 0 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  text-align: left;
+}
+
+.settings .slider {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "label value" "input input";
+  gap: 6px 10px;
+  align-items: center;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+}
+
+.settings .slider > span { grid-area: label; }
+.settings .slider > b { grid-area: value; font-variant-numeric: tabular-nums; }
+.settings .slider > input { grid-area: input; width: 100%; accent-color: #3fc9ff; }
+
+.settings .check {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  cursor: pointer;
+  /* The surrounding panel centres its text; the label belongs beside its box. */
+  text-align: left;
+}
+
+.settings .check span { flex: 0 1 auto; }
+.settings .check input[type="checkbox"] {
+  flex: 0 0 auto;
+  margin: 0;
+  /* `input { width: 110px }` above is for the seed field; a checkbox drawn
+     inside 110px sits marooned in the middle of its own hit area. */
+  width: auto;
+  height: auto;
+  accent-color: #3fc9ff;
+}
+
+
+/*
+ * The card screen hands the pointer back, so it needs a pointer to hand back.
+ * Without this the cursor stays the gameplay crosshair over clickable cards.
+ */
+body.choosing canvas#gl { cursor: pointer; }

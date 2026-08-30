@@ -58,6 +58,17 @@
       <div class="panel small">
         <h2>PAUSED</h2>
         <p class="tag">THE DUNGEON WAITS.</p>
+        <div class="settings">
+          <label class="slider">
+            <span>LOOK SENSITIVITY</span>
+            <input id="sensInput" type="range" min="6" max="100" step="1" />
+            <b id="sensValue">32</b>
+          </label>
+          <label class="check">
+            <input id="invertInput" type="checkbox" />
+            <span>INVERT VERTICAL LOOK</span>
+          </label>
+        </div>
         <div class="startRow">
           <button id="resumeBtn" class="primary">RESUME</button>
           <button id="quitBtn">ABANDON</button>

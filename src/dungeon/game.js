@@ -37,10 +37,25 @@ const PLAYER = {
   maxHull: 130,
   maxCharge: 100,
   chargeRegen: 19,
-  walkSpeed: 3.9,
-  runSpeed: 6.2,
+  // You move at a shooter's pace, not a walking-simulator's. The earlier 3.9
+  // was slower than a crawler's 4.35, which meant Shift was not a sprint but a
+  // requirement - the game was unplayable without holding it, and holding a key
+  // to move at a normal speed is the definition of sluggish. Base speed now
+  // outruns the horde in open ground, and the threat is being surrounded rather
+  // than being outpaced, which is what a bullet heaven is actually about.
+  walkSpeed: 5.7,
+  runSpeed: 8.4,
   eye: 1.62,
   invulnAfterHit: 0.42,
+};
+
+/** Look feel. Persisted, because a fixed sensitivity fits nobody's mouse. */
+const LOOK = {
+  defaultSensitivity: 0.0032,
+  minSensitivity: 0.0006,
+  maxSensitivity: 0.010,
+  // Just short of straight up and straight down, as every modern shooter does.
+  pitchLimit: (89 * Math.PI) / 180,
 };
 
 const SURGE = { cost: 26, cooldown: 0.55 };
@@ -84,7 +99,9 @@ export class Game {
     this.surging = false;
     this.blasting = false;
     this.pointerLocked = false;
-    this.sensitivity = 0.0019;
+    this.sensitivity = this.loadSetting('nexusDepthsSens', LOOK.defaultSensitivity,
+      LOOK.minSensitivity, LOOK.maxSensitivity);
+    this.invertY = this.loadSetting('nexusDepthsInvertY', 0, 0, 1) === 1;
     this.lastFrame = performance.now();
     this.accumulator = 0;
     this.stepSeconds = 1 / 120;
@@ -97,6 +114,18 @@ export class Game {
   }
 
   /* ------------------------------- setup ------------------------------- */
+
+  /** Read a persisted setting, clamped, tolerating private-mode storage errors. */
+  loadSetting(key, fallback, min, max) {
+    let raw = NaN;
+    try { raw = Number(localStorage.getItem(key)); } catch { raw = NaN; }
+    if (!Number.isFinite(raw) || raw === 0 && fallback !== 0) return fallback;
+    return Math.max(min, Math.min(max, raw));
+  }
+
+  saveSetting(key, value) {
+    try { localStorage.setItem(key, String(value)); } catch { /* private mode */ }
+  }
 
   showBest() {
     let best = 0;
@@ -221,6 +250,33 @@ export class Game {
     document.getElementById('newRunBtn').onclick = () => this.startRun(Math.floor(Math.random() * 999999) + 1);
     document.getElementById('resumeBtn').onclick = () => this.setPaused(false);
     document.getElementById('quitBtn').onclick = () => this.toTitle();
+    // Look settings. The slider is in thousandths of a radian per pixel, which
+    // is a number a person can reason about, and it applies live so you can
+    // feel the change with the game still behind the pause panel.
+    const sens = document.getElementById('sensInput');
+    const sensValue = document.getElementById('sensValue');
+    if (sens) {
+      const sync = () => {
+        sens.value = String(Math.round(this.sensitivity * 10000));
+        if (sensValue) sensValue.textContent = sens.value;
+      };
+      sync();
+      sens.addEventListener('input', () => {
+        this.sensitivity = Math.max(LOOK.minSensitivity,
+          Math.min(LOOK.maxSensitivity, Number(sens.value) / 10000));
+        if (sensValue) sensValue.textContent = sens.value;
+        this.saveSetting('nexusDepthsSens', this.sensitivity);
+      });
+    }
+    const invert = document.getElementById('invertInput');
+    if (invert) {
+      invert.checked = this.invertY;
+      invert.addEventListener('change', () => {
+        this.invertY = invert.checked;
+        this.saveSetting('nexusDepthsInvertY', this.invertY ? 1 : 0);
+      });
+    }
+
     const mute = document.getElementById('muteBtn');
     mute.onclick = () => {
       this.muted = !this.muted;
@@ -229,7 +285,14 @@ export class Game {
     };
 
     this.el.canvas.addEventListener('mousedown', (e) => {
-      if (this.state === 'levelup') { this.chooseCard(0); return; }
+      if (this.state === 'levelup') {
+        // A short grace period, so a click already travelling when the cards
+        // appeared cannot spend them.
+        if (performance.now() - (this.cardsShownAt || 0) < 250) return;
+        const index = this.cardAtPointer(e);
+        if (index >= 0) this.chooseCard(index);
+        return;
+      }
       if (this.state !== 'playing') return;
       if (document.pointerLockElement !== this.el.canvas) { this.el.canvas.requestPointerLock?.(); return; }
       if (e.button === 0) this.surging = true;
@@ -252,12 +315,18 @@ export class Game {
     });
 
     window.addEventListener('mousemove', (e) => {
+      if (this.state === 'levelup') { this.hoverCard = this.cardAtPointer(e); return; }
       if (!this.player || !this.pointerLocked) return;
       if (this.state !== 'playing' && this.state !== 'levelup') return;
+      // Raw deltas straight through: no smoothing and no acceleration, which is
+      // what makes a shooter feel like it is tracking your hand. Vertical uses
+      // the same sensitivity as horizontal so a 90-degree flick is the same
+      // distance in both axes.
       this.player.yaw += e.movementX * this.sensitivity;
       if (this.player.yaw > Math.PI) this.player.yaw -= Math.PI * 2;
       else if (this.player.yaw < -Math.PI) this.player.yaw += Math.PI * 2;
-      this.player.pitch = Math.max(-1.25, Math.min(1.25, this.player.pitch - e.movementY * this.sensitivity * 0.9));
+      const dy = e.movementY * this.sensitivity * (this.invertY ? -1 : 1);
+      this.player.pitch = Math.max(-LOOK.pitchLimit, Math.min(LOOK.pitchLimit, this.player.pitch - dy));
     });
 
     window.addEventListener('keydown', (e) => {
@@ -355,6 +424,14 @@ export class Game {
     this.player.hull += (this.maxHull() - this.player.hull) * 0.25;
     this.pendingCards = this.loadout.offer(this.deepest);
     this.state = 'levelup';
+    // Hand the cursor back so the choice is a real click on a real card.
+    // While the pointer was locked the only mouse affordance was "any click
+    // takes card one", and since the left button is also the surge, a level-up
+    // arriving mid-fight was dismissed before it could be read.
+    this.cardsShownAt = performance.now();
+    this.hoverCard = -1;
+    document.exitPointerLock?.();
+    document.body.classList.add('choosing');
     this.shake = Math.max(this.shake, 0.12);
     this.audio.play('levelUp', { force: true });
     this.audio.setIntensity(0.2);
@@ -367,10 +444,34 @@ export class Game {
     this.loadout.take(card);
     this.player.hull = Math.min(this.maxHull(), this.player.hull);
     this.pendingCards = null;
+    this.hoverCard = -1;
     this.state = 'playing';
+    document.body.classList.remove('choosing');
     this.audio.play('choose', { force: true });
     this.toast(`${card.title.toUpperCase()}`, 'good');
+    // Picking is itself the user gesture, so re-locking here is always allowed.
     if (!this.pointerLocked) this.el.canvas.requestPointerLock?.();
+  }
+
+  /**
+   * Which card is under the mouse, or -1.
+   *
+   * The HUD canvas is a small buffer stretched over the window, so a client
+   * coordinate has to be scaled into HUD pixels before it means anything.
+   */
+  cardAtPointer(event) {
+    const rects = this.hud.cardRects;
+    if (!rects) return -1;
+    const canvas = this.el.hudCanvas;
+    const box = canvas.getBoundingClientRect();
+    if (!box.width || !box.height) return -1;
+    const x = (event.clientX - box.left) * (canvas.width / box.width);
+    const y = (event.clientY - box.top) * (canvas.height / box.height);
+    for (let i = 0; i < rects.length; i += 1) {
+      const r = rects[i];
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return i;
+    }
+    return -1;
   }
 
   maxHull() {
@@ -481,6 +582,15 @@ export class Game {
       if (s.aim !== 'orbit') continue;
       weapon.orbitPhase += dt * (s.speed * (1 + this.loadout.stats.haste));
       if (!weapon.hitClock) weapon.hitClock = new Map();
+      // Forget enemies past the re-hit window. Without this the map keeps an
+      // entry for every body an orbit has ever brushed - thousands over a long
+      // run, none of which can ever matter again.
+      if (weapon.hitClock.size > 256) {
+        const stale = this.swarm.clock - 1;
+        for (const [id, when] of weapon.hitClock) {
+          if (when < stale) weapon.hitClock.delete(id);
+        }
+      }
       const radius = 2.1 * bonus;
       for (let i = 0; i < s.count; i += 1) {
         const angle = weapon.orbitPhase + (i / s.count) * Math.PI * 2;
@@ -498,7 +608,12 @@ export class Game {
           const dir = [enemy.x - this.player.x, enemy.z - this.player.z];
           const len = Math.hypot(dir[0], dir[1]) || 1;
           const damage = s.damage * (1 + this.loadout.stats.damage);
-          this.swarm.applyImpact({ x, y, z, damage, weapon: s, colour: s.colour }, enemy, hooks);
+          // The floor and the area-scaled blast go in here too: applyImpact now
+          // filters splash and chain by floor, and reads its radius off this.
+          this.swarm.applyImpact({
+            x, y, z, damage, weapon: s, colour: s.colour,
+            floor: floorIndex, blast: s.blast * bonus,
+          }, enemy, hooks);
           this.swarm.hurt(enemy, damage, [dir[0] / len, dir[1] / len], hooks);
           this.swarm.burst(x, y, z, s.trail, 3);
           this.audio.play(s.sfx, { pitch: 0.9 + Math.random() * 0.4, spacing: 0.05 });
@@ -770,14 +885,25 @@ export class Game {
       boss: this.bossState,
       hitmark: this.hitmarkTimer,
       cards: this.pendingCards,
+      hoverCard: this.hoverCard,
       combo: this.combo,
       comboRatio: this.combo ? Math.max(0, this.comboTimer / this.comboWindow()) : 0,
       comboMult: this.comboScoreMult(),
     }, dt);
 
-    this.el.damage.style.opacity = String(this.damageFlash * 0.55);
+    // Only touch the DOM when the value actually changes. Assigning an inline
+    // style every frame invalidates and recomposites a full-screen overlay
+    // whether or not the number moved, which is real work for no change.
+    const flash = Math.round(this.damageFlash * 55) / 100;
+    if (flash !== this.lastFlash) {
+      this.el.damage.style.opacity = String(flash);
+      this.lastFlash = flash;
+    }
     const low = this.player.hull / this.maxHull() < 0.3 && this.state === 'playing';
-    this.el.lowHp.classList.toggle('show', low);
+    if (low !== this.lastLow) {
+      this.el.lowHp.classList.toggle('show', low);
+      this.lastLow = low;
+    }
   }
 
   step(dt, floorIndex) {
