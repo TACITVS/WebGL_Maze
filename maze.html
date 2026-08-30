@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NEXUS MAZE - Final Edition v6 (Stable Audio)</title>
+  <link rel="icon" href="data:," />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles/main.css" />
+</head>
+<body>
+  <div class="custom-cursor" id="cursor"></div>
+  <div id="damageFlash"></div>
+
+  <div id="loading" class="fullscreen-overlay loading-overlay">
+    <div class="overlay-title">NEXUS MAZE</div>
+    <div class="overlay-subtitle">Final Edition</div>
+    <div class="progress-bar">
+      <div class="progress-fill" id="progress"></div>
+    </div>
+    <div id="loading-status">Initializing quantum maze systems...</div>
+  </div>
+
+  <div id="gameOverScreen" class="fullscreen-overlay" style="display: none;">
+    <div class="overlay-title">GAME OVER</div>
+    <div class="overlay-subtitle" id="finalScore">FINAL SCORE: 0</div>
+    <button id="restartButton" class="overlay-button">RESTART</button>
+  </div>
+
+  <div id="gameWonScreen" class="fullscreen-overlay" style="display: none;">
+    <div class="overlay-title">VICTORY</div>
+    <div class="overlay-subtitle">You have conquered the Nexus Maze!</div>
+    <div class="overlay-subtitle" id="finalScoreWon">FINAL SCORE: 0</div>
+    <button id="restartButtonWon" class="overlay-button">PLAY AGAIN</button>
+  </div>
+
+  <div id="ui" style="display: none;">
+    <div class="ui-title">⬢ NEXUS CONTROL</div>
+    <div class="ui-stat"><span class="ui-label">SCORE</span><span class="ui-value" id="score">0</span></div>
+    <div class="ui-stat"><span class="ui-label">TIME</span><span class="ui-value" id="time">0s</span></div>
+    <div class="ui-stat"><span class="ui-label">LEVEL</span><span class="ui-value" id="level">1</span></div>
+    <div class="ui-stat"><span class="ui-label">HEALTH</span><span class="ui-value" id="health">💚 100%</span></div>
+    <div class="ui-stat"><span class="ui-label">ENERGY</span><span class="ui-value" id="energy">⚡ 100%</span></div>
+    <div class="ui-stat"><span class="ui-label">COORDS</span><span class="ui-value" id="position">(0, 0)</span></div>
+    <div id="controls">
+      <div class="control-group"><strong>MOVEMENT:</strong> WASD / Arrows</div>
+      <div class="control-group"><strong>BOOST:</strong> Hold SHIFT</div>
+      <div class="control-group" id="jump-status"><strong>PHASE DASH:</strong> SPACE</div>
+      <div class="control-group"><strong>NEW MAZE:</strong> R Key</div>
+      <div class="control-group"><strong>CAMERA:</strong> C Key</div>
+      <div class="control-group"><strong>SOUND:</strong> M Key</div>
+    </div>
+  </div>
+
+  <canvas id="minimap" style="display: none;"></canvas>
+  <button id="audio-button" style="display: none;">🔊</button>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.min.js"></script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
